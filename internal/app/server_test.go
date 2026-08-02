@@ -274,6 +274,44 @@ func TestChallengeRejectsVideoAndIncompleteDetails(t *testing.T) {
 	}
 }
 
+func TestLegacySettingsGainDefaultSlideshowInterval(t *testing.T) {
+	uploadDir := t.TempDir()
+	salt := "0123456789abcdef0123456789abcdef"
+	legacy := map[string]any{
+		"moderation_enabled": false,
+		"slideshow_style":    "classic",
+		"password_salt":      salt,
+		"password_hash":      passwordDigest(salt, "legacy-password"),
+		"media":              map[string]string{},
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(uploadDir, "settings.json")
+	if err := os.WriteFile(settingsPath, data, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	store, err := newSettingsStore(uploadDir, "ignored-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.snapshot().SlideshowIntervalSeconds; got != defaultSlideshowIntervalSeconds {
+		t.Fatalf("migrated slideshow interval: got %d, want %d", got, defaultSlideshowIntervalSeconds)
+	}
+	persisted, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var migrated persistedSettings
+	if err := json.Unmarshal(persisted, &migrated); err != nil {
+		t.Fatal(err)
+	}
+	if migrated.SlideshowIntervalSeconds != defaultSlideshowIntervalSeconds {
+		t.Fatalf("persisted slideshow interval: got %d, want %d", migrated.SlideshowIntervalSeconds, defaultSlideshowIntervalSeconds)
+	}
+}
+
 func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	cfg := testConfig(t)
 	handler, err := New(cfg)
@@ -293,11 +331,23 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 		t.Fatalf("wrong login: got %d", wrongLogin.Code)
 	}
 	cookie := settingsLogin(t, handler, "test-settings-password")
+	defaultsRes := httptest.NewRecorder()
+	handler.ServeHTTP(defaultsRes, jsonRequest(t, http.MethodGet, "/api/settings", nil, cookie))
+	var defaultsPayload struct {
+		SlideshowIntervalSeconds int `json:"slideshow_interval_seconds"`
+	}
+	if err := json.NewDecoder(defaultsRes.Body).Decode(&defaultsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if defaultsPayload.SlideshowIntervalSeconds != defaultSlideshowIntervalSeconds {
+		t.Fatalf("default slideshow interval: got %d, want %d", defaultsPayload.SlideshowIntervalSeconds, defaultSlideshowIntervalSeconds)
+	}
 
 	moderationEnabled := true
 	update := jsonRequest(t, http.MethodPost, "/api/settings", map[string]any{
-		"moderation_enabled": moderationEnabled,
-		"slideshow_style":    "polaroid",
+		"moderation_enabled":         moderationEnabled,
+		"slideshow_style":            "polaroid",
+		"slideshow_interval_seconds": 7,
 	}, cookie)
 	updateRes := httptest.NewRecorder()
 	handler.ServeHTTP(updateRes, update)
@@ -315,26 +365,41 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	publicListRes := httptest.NewRecorder()
 	handler.ServeHTTP(publicListRes, jsonRequest(t, http.MethodGet, "/api/media", nil, nil))
 	var publicPayload struct {
-		Items          []publicMedia `json:"items"`
-		SlideshowStyle string        `json:"slideshow_style"`
+		Items                    []publicMedia `json:"items"`
+		SlideshowStyle           string        `json:"slideshow_style"`
+		SlideshowIntervalSeconds int           `json:"slideshow_interval_seconds"`
 	}
 	if err := json.NewDecoder(publicListRes.Body).Decode(&publicPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(publicPayload.Items) != 0 || publicPayload.SlideshowStyle != "polaroid" {
+	if len(publicPayload.Items) != 0 || publicPayload.SlideshowStyle != "polaroid" || publicPayload.SlideshowIntervalSeconds != 7 {
 		t.Fatalf("unexpected public payload: %+v", publicPayload)
 	}
 
 	settingsRes := httptest.NewRecorder()
 	handler.ServeHTTP(settingsRes, jsonRequest(t, http.MethodGet, "/api/settings", nil, cookie))
 	var settingsPayload struct {
-		Items []adminMedia `json:"items"`
+		Items                    []adminMedia `json:"items"`
+		SlideshowIntervalSeconds int          `json:"slideshow_interval_seconds"`
 	}
 	if err := json.NewDecoder(settingsRes.Body).Decode(&settingsPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(settingsPayload.Items) != 1 || settingsPayload.Items[0].Status != "pending" {
+	if len(settingsPayload.Items) != 1 || settingsPayload.Items[0].Status != "pending" || settingsPayload.SlideshowIntervalSeconds != 7 {
 		t.Fatalf("unexpected moderation queue: %+v", settingsPayload.Items)
+	}
+	invalidIntervalRes := httptest.NewRecorder()
+	handler.ServeHTTP(invalidIntervalRes, jsonRequest(t, http.MethodPost, "/api/settings", map[string]any{"slideshow_interval_seconds": 2}, cookie))
+	if invalidIntervalRes.Code != http.StatusBadRequest {
+		t.Fatalf("invalid slideshow interval: got %d: %s", invalidIntervalRes.Code, invalidIntervalRes.Body.String())
+	}
+	settingsAfterInvalidRes := httptest.NewRecorder()
+	handler.ServeHTTP(settingsAfterInvalidRes, jsonRequest(t, http.MethodGet, "/api/settings", nil, cookie))
+	if err := json.NewDecoder(settingsAfterInvalidRes.Body).Decode(&settingsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if settingsPayload.SlideshowIntervalSeconds != 7 {
+		t.Fatalf("invalid slideshow interval changed setting to %d", settingsPayload.SlideshowIntervalSeconds)
 	}
 	item := settingsPayload.Items[0]
 	publicMediaRes := httptest.NewRecorder()

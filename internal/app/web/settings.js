@@ -11,6 +11,10 @@
   const moderationToggle = document.querySelector('#moderation-toggle');
   const moderationLabel = document.querySelector('#moderation-label');
   const styleInputs = Array.from(document.querySelectorAll('input[name="slideshow-style"]'));
+  const intervalForm = document.querySelector('#interval-form');
+  const intervalInput = document.querySelector('#slideshow-interval');
+  const intervalError = document.querySelector('#interval-error');
+  const intervalSuccess = document.querySelector('#interval-success');
   const filters = Array.from(document.querySelectorAll('[data-filter]'));
   const pendingCount = document.querySelector('#pending-count');
   const grid = document.querySelector('#moderation-grid');
@@ -125,6 +129,7 @@
     moderationToggle.checked = Boolean(state.moderation_enabled);
     moderationLabel.textContent = moderationToggle.checked ? 'An' : 'Aus';
     styleInputs.forEach((input) => { input.checked = input.value === state.slideshow_style; });
+    intervalInput.value = String(state.slideshow_interval_seconds || 10);
     login.hidden = true;
     dashboard.hidden = false;
     renderItems();
@@ -209,6 +214,22 @@
   styleInputs.forEach((input) => input.addEventListener('change', () => {
     if (input.checked) saveSettings({ slideshow_style: input.value });
   }));
+
+  intervalForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    intervalError.hidden = true;
+    intervalSuccess.hidden = true;
+    const seconds = Number(intervalInput.value);
+    if (!Number.isInteger(seconds) || seconds < 3 || seconds > 300) {
+      intervalError.textContent = 'Bitte eine ganze Zahl zwischen 3 und 300 Sekunden eingeben.';
+      intervalError.hidden = false;
+      return;
+    }
+    const saved = await saveSettings({ slideshow_interval_seconds: seconds });
+    if (!saved) return;
+    intervalSuccess.textContent = `Die Wechselzeit beträgt jetzt ${seconds} Sekunden.`;
+    intervalSuccess.hidden = false;
+  });
 
   filters.forEach((button) => button.addEventListener('click', () => {
     activeFilter = button.dataset.filter;

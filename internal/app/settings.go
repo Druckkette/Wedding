@@ -21,12 +21,19 @@ import (
 
 const settingsSessionCookie = "wedding_settings_session"
 
+const (
+	defaultSlideshowIntervalSeconds = 10
+	minSlideshowIntervalSeconds     = 3
+	maxSlideshowIntervalSeconds     = 300
+)
+
 type persistedSettings struct {
-	ModerationEnabled bool              `json:"moderation_enabled"`
-	SlideshowStyle    string            `json:"slideshow_style"`
-	PasswordSalt      string            `json:"password_salt"`
-	PasswordHash      string            `json:"password_hash"`
-	Media             map[string]string `json:"media"`
+	ModerationEnabled        bool              `json:"moderation_enabled"`
+	SlideshowStyle           string            `json:"slideshow_style"`
+	SlideshowIntervalSeconds int               `json:"slideshow_interval_seconds"`
+	PasswordSalt             string            `json:"password_salt"`
+	PasswordHash             string            `json:"password_hash"`
+	Media                    map[string]string `json:"media"`
 }
 
 type settingsStore struct {
@@ -41,10 +48,11 @@ type sessionStore struct {
 }
 
 type settingsUpdate struct {
-	ModerationEnabled *bool  `json:"moderation_enabled"`
-	SlideshowStyle    string `json:"slideshow_style"`
-	CurrentPassword   string `json:"current_password"`
-	NewPassword       string `json:"new_password"`
+	ModerationEnabled        *bool  `json:"moderation_enabled"`
+	SlideshowStyle           string `json:"slideshow_style"`
+	SlideshowIntervalSeconds *int   `json:"slideshow_interval_seconds"`
+	CurrentPassword          string `json:"current_password"`
+	NewPassword              string `json:"new_password"`
 }
 
 type moderationUpdate struct {
@@ -70,8 +78,18 @@ func newSettingsStore(uploadDir, initialPassword string) (*settingsStore, error)
 		if store.state.SlideshowStyle != "polaroid" {
 			store.state.SlideshowStyle = "classic"
 		}
+		migrateInterval := false
+		if !validSlideshowInterval(store.state.SlideshowIntervalSeconds) {
+			store.state.SlideshowIntervalSeconds = defaultSlideshowIntervalSeconds
+			migrateInterval = true
+		}
 		if store.state.PasswordSalt == "" || store.state.PasswordHash == "" {
 			return nil, errors.New("settings password hash is missing")
+		}
+		if migrateInterval {
+			if err := store.saveLocked(store.state); err != nil {
+				return nil, fmt.Errorf("migrate settings: %w", err)
+			}
 		}
 		return store, nil
 	}
@@ -84,10 +102,11 @@ func newSettingsStore(uploadDir, initialPassword string) (*settingsStore, error)
 		return nil, err
 	}
 	store.state = persistedSettings{
-		SlideshowStyle: "classic",
-		PasswordSalt:   salt,
-		PasswordHash:   passwordDigest(salt, initialPassword),
-		Media:          make(map[string]string),
+		SlideshowStyle:           "classic",
+		SlideshowIntervalSeconds: defaultSlideshowIntervalSeconds,
+		PasswordSalt:             salt,
+		PasswordHash:             passwordDigest(salt, initialPassword),
+		Media:                    make(map[string]string),
 	}
 	if err := store.saveLocked(store.state); err != nil {
 		return nil, err
@@ -120,6 +139,12 @@ func (s *settingsStore) update(update settingsUpdate) error {
 			return errors.New("invalid slideshow style")
 		}
 		next.SlideshowStyle = update.SlideshowStyle
+	}
+	if update.SlideshowIntervalSeconds != nil {
+		if !validSlideshowInterval(*update.SlideshowIntervalSeconds) {
+			return errors.New("slideshow interval must be between 3 and 300 seconds")
+		}
+		next.SlideshowIntervalSeconds = *update.SlideshowIntervalSeconds
 	}
 	if update.NewPassword != "" {
 		if len(update.NewPassword) < 6 || len(update.NewPassword) > 128 {
@@ -247,6 +272,10 @@ func cloneSettings(state persistedSettings) persistedSettings {
 		clone.Media[name] = status
 	}
 	return clone
+}
+
+func validSlideshowInterval(seconds int) bool {
+	return seconds >= minSlideshowIntervalSeconds && seconds <= maxSlideshowIntervalSeconds
 }
 
 func passwordDigest(salt, password string) string {
@@ -384,10 +413,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                 true,
-		"moderation_enabled": state.ModerationEnabled,
-		"slideshow_style":    state.SlideshowStyle,
-		"items":              media,
+		"ok":                         true,
+		"moderation_enabled":         state.ModerationEnabled,
+		"slideshow_style":            state.SlideshowStyle,
+		"slideshow_interval_seconds": state.SlideshowIntervalSeconds,
+		"items":                      media,
 	})
 }
 
@@ -503,6 +533,8 @@ func settingsErrorMessage(err error) string {
 		return "Das aktuelle Passwort ist nicht korrekt."
 	case "new password must contain between 6 and 128 characters":
 		return "Das neue Passwort muss mindestens 6 Zeichen lang sein."
+	case "slideshow interval must be between 3 and 300 seconds":
+		return "Die Wechselzeit muss zwischen 3 und 300 Sekunden liegen."
 	default:
 		return "Settings konnten nicht gespeichert werden."
 	}

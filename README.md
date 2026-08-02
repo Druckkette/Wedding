@@ -63,3 +63,5 @@ curl -fsS http://127.0.0.1:18787/healthz
 ```
 
 Backups sollten mindestens den Ordner aus `NAS_UPLOAD_DIR` umfassen. Dort liegen neben den Medien auch `uploads.jsonl` und die passwortgeschützten Moderationseinstellungen in `settings.json`. Ausgeblendete Medien werden nicht gelöscht und können in Settings wieder freigegeben werden. Die zusätzliche Aktion „Löschen“ entfernt eine Aufnahme nach einer Sicherheitsabfrage dauerhaft vom NAS.
+
+Die Beamer-Wechselzeit lässt sich in Settings sekundengenau zwischen 3 und 300 Sekunden einstellen. Bestehende Installationen verwenden automatisch den Standardwert von 10 Sekunden.

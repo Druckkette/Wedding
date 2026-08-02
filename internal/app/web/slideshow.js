@@ -26,6 +26,7 @@
   let running = false;
   let advanceSignal = 0;
   let appearanceIndex = 0;
+  let slideDurationMilliseconds = 10000;
 
   for (let index = 0; index < 36; index += 1) {
     const piece = document.createElement('i');
@@ -95,7 +96,7 @@
     }
     const position = items.findIndex((candidate) => candidate.id === item.id);
     counter.textContent = position >= 0 ? `${position + 1} / ${items.length}` : `${items.length} Aufnahmen`;
-    await waitForSlide(9500);
+    await waitForSlide(slideDurationMilliseconds);
     newBadge.hidden = true;
   }
 
@@ -129,6 +130,11 @@
       const payload = await response.json();
       const pictures = payload.items.filter((item) => item.kind === 'image');
       slideshow.classList.toggle('polaroid-mode', payload.slideshow_style === 'polaroid');
+      const nextDuration = Number(payload.slideshow_interval_seconds) * 1000;
+      if (Number.isFinite(nextDuration) && nextDuration !== slideDurationMilliseconds) {
+        slideDurationMilliseconds = nextDuration;
+        if (initialized) advanceSignal += 1;
+      }
       if (!initialized) {
         pictures.forEach((item) => known.add(item.id));
         initialized = true;

@@ -75,6 +75,19 @@
             <small>Jedes Bild fliegt als Polaroid herein</small>
           </label>
         </div>
+        <form class="interval-form" id="interval-form">
+          <div class="interval-copy">
+            <label for="slideshow-interval">Wechselzeit</label>
+            <small>Wie lange jedes Bild auf dem Beamer sichtbar bleibt.</small>
+          </div>
+          <div class="interval-input">
+            <input id="slideshow-interval" type="number" min="3" max="300" step="1" inputmode="numeric" required>
+            <span>Sekunden</span>
+          </div>
+          <button type="submit">Übernehmen</button>
+          <p class="settings-error" id="interval-error" role="alert" hidden></p>
+          <p class="settings-success" id="interval-success" role="status" hidden></p>
+        </form>
       </section>
 
       <section class="settings-card moderation-card" aria-labelledby="queue-heading">

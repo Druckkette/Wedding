@@ -514,7 +514,12 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "slideshow_style": s.settings.snapshot().SlideshowStyle})
+	settings := s.settings.snapshot()
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"items":                      items,
+		"slideshow_style":            settings.SlideshowStyle,
+		"slideshow_interval_seconds": settings.SlideshowIntervalSeconds,
+	})
 }
 
 func (s *Server) toPublicMedia(item uploadMetadata) publicMedia {

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f2ea">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="upload-token" content="{{.UploadToken}}">
+  <meta name="max-upload-mb" content="{{.MaxUploadMB}}">
+  <title>{{.Title}} – Fotos teilen</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero" aria-labelledby="page-title">
+      <div class="botanical botanical-left" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <p class="eyebrow">Momente für immer</p>
+      <h1 id="page-title">{{.Title}}</h1>
+      <p class="subtitle">{{.Subtitle}}</p>
+      <div class="heart" aria-hidden="true">♥</div>
+      <div class="botanical botanical-right" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+    </section>
+
+    <section class="upload-card" aria-labelledby="upload-heading">
+      <div class="step-mark" aria-hidden="true">01</div>
+      <div class="card-heading">
+        <h2 id="upload-heading">Eure Fotos</h2>
+        <p>Wählt mehrere Bilder auf einmal aus. Die Originale werden direkt und sicher auf unserem privaten Speicher abgelegt.</p>
+      </div>
+
+      <label class="name-field" for="guest-name">
+        <span>Euer Name <small>(freiwillig)</small></span>
+        <input id="guest-name" name="guest-name" type="text" maxlength="80" autocomplete="name" placeholder="z. B. Anna &amp; Felix">
+      </label>
+
+      <input id="photo-input" class="visually-hidden" type="file" accept="image/*,.heic,.heif,.avif" multiple>
+      <label class="drop-zone" for="photo-input" id="drop-zone">
+        <span class="camera-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" role="img"><path d="M17 13.5 20 9h8l3 4.5h6.5A4.5 4.5 0 0 1 42 18v17.5a4.5 4.5 0 0 1-4.5 4.5h-27A4.5 4.5 0 0 1 6 35.5V18a4.5 4.5 0 0 1 4.5-4.5H17Zm7 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-3.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z"/></svg>
+        </span>
+        <strong>Fotos auswählen</strong>
+        <span>aus der Mediathek oder direkt aufnehmen</span>
+        <em>JPEG, PNG, HEIC, WebP oder AVIF · bis {{.MaxUploadMB}} MB</em>
+      </label>
+
+      <div id="selection" class="selection" hidden>
+        <div class="selection-head">
+          <strong id="selection-count"></strong>
+          <button class="text-button" id="clear-button" type="button">Auswahl löschen</button>
+        </div>
+        <ul id="file-list" class="file-list" aria-live="polite"></ul>
+        <button class="upload-button" id="upload-button" type="button">
+          <span id="upload-button-label">Fotos hochladen</span>
+          <span class="button-arrow" aria-hidden="true">→</span>
+        </button>
+      </div>
+
+      <div id="result" class="result" role="status" aria-live="polite" hidden>
+        <div class="result-icon" aria-hidden="true">✓</div>
+        <h2>Vielen Dank!</h2>
+        <p id="result-message"></p>
+        <button class="secondary-button" id="more-button" type="button">Weitere Fotos auswählen</button>
+      </div>
+    </section>
+
+    <footer>
+      <span class="lock" aria-hidden="true">⌁</span>
+      <p>Nur das Brautpaar kann die hochgeladenen Bilder sehen.</p>
+    </footer>
+  </main>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

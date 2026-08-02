@@ -1,0 +1,70 @@
+package app
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	ListenAddr        string
+	UploadDir         string
+	UploadToken       string
+	EventTitle        string
+	EventSubtitle     string
+	MaxUploadBytes    int64
+	MaxUploadsPerHour int
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+}
+
+func ConfigFromEnv() (Config, error) {
+	cfg := Config{
+		ListenAddr:        envOr("LISTEN_ADDR", ":8080"),
+		UploadDir:         envOr("UPLOAD_DIR", "/data/uploads"),
+		UploadToken:       strings.TrimSpace(os.Getenv("UPLOAD_TOKEN")),
+		EventTitle:        envOr("EVENT_TITLE", "Unsere Hochzeit"),
+		EventSubtitle:     envOr("EVENT_SUBTITLE", "Haltet eure schönsten Momente mit uns fest."),
+		MaxUploadBytes:    75 << 20,
+		MaxUploadsPerHour: 120,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	if value := strings.TrimSpace(os.Getenv("MAX_UPLOAD_MB")); value != "" {
+		mb, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || mb < 1 || mb > 500 {
+			return Config{}, fmt.Errorf("MAX_UPLOAD_MB must be between 1 and 500")
+		}
+		cfg.MaxUploadBytes = mb << 20
+	}
+	if value := strings.TrimSpace(os.Getenv("MAX_UPLOADS_PER_HOUR")); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 5000 {
+			return Config{}, fmt.Errorf("MAX_UPLOADS_PER_HOUR must be between 1 and 5000")
+		}
+		cfg.MaxUploadsPerHour = limit
+	}
+
+	if len(cfg.UploadToken) < 32 {
+		return Config{}, errors.New("UPLOAD_TOKEN must contain at least 32 characters")
+	}
+	if strings.ContainsAny(cfg.UploadToken, "/?#") {
+		return Config{}, errors.New("UPLOAD_TOKEN must be URL-path safe")
+	}
+	return cfg, nil
+}
+
+func envOr(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}

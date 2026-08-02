@@ -50,6 +50,7 @@ button, a { font: inherit; }
 .slideshow-controls button, .slideshow-controls a { padding: 9px 13px; border: 0; border-radius: 999px; background: transparent; color: rgba(255,255,255,.86); cursor: pointer; font-size: .72rem; text-decoration: none; }
 .slideshow-controls button:hover, .slideshow-controls a:hover { background: rgba(255,255,255,.12); }
 :fullscreen .slideshow-controls { opacity: 1; }
+:fullscreen .slideshow.fullscreen-ui-hidden { cursor: none; }
 :fullscreen .slideshow.fullscreen-ui-hidden .live-indicator,
 :fullscreen .slideshow.fullscreen-ui-hidden .slide-counter,
 :fullscreen .slideshow.fullscreen-ui-hidden .slideshow-controls { visibility: hidden; opacity: 0; pointer-events: none; }

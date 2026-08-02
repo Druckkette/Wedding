@@ -32,13 +32,16 @@ var safeFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 var storedMediaName = regexp.MustCompile(`^[0-9]{8}_[0-9]{6}\.[0-9]{3}_[a-zA-Z0-9._-]+_[a-f0-9]{16}\.(jpg|png|gif|webp|heic|heif|avif|mp4|mov|m4v|3gp|ogv|avi|webm|mkv|mpeg)$`)
 
 type Server struct {
-	cfg       Config
-	templates map[string]*template.Template
-	assets    http.Handler
-	limiter   *rateLimiter
-	writeGate chan struct{}
-	metaMu    sync.Mutex
-	now       func() time.Time
+	cfg             Config
+	templates       map[string]*template.Template
+	assets          http.Handler
+	limiter         *rateLimiter
+	settingsLimiter *rateLimiter
+	writeGate       chan struct{}
+	metaMu          sync.Mutex
+	settings        *settingsStore
+	sessions        *sessionStore
+	now             func() time.Time
 }
 
 type pageData struct {
@@ -81,8 +84,13 @@ func New(cfg Config) (http.Handler, error) {
 		return nil, err
 	}
 
-	templates := make(map[string]*template.Template, 3)
-	for _, name := range []string{"index", "gallery", "slideshow"} {
+	settings, err := newSettingsStore(cfg.UploadDir, cfg.SettingsPassword)
+	if err != nil {
+		return nil, fmt.Errorf("initialize settings: %w", err)
+	}
+
+	templates := make(map[string]*template.Template, 4)
+	for _, name := range []string{"index", "gallery", "slideshow", "settings"} {
 		tmplBytes, err := webFiles.ReadFile("web/" + name + ".html")
 		if err != nil {
 			return nil, err
@@ -99,12 +107,15 @@ func New(cfg Config) (http.Handler, error) {
 	}
 
 	s := &Server{
-		cfg:       cfg,
-		templates: templates,
-		assets:    http.FileServer(http.FS(assetFS)),
-		limiter:   newRateLimiter(cfg.MaxUploadsPerHour, time.Hour),
-		writeGate: make(chan struct{}, 4),
-		now:       time.Now,
+		cfg:             cfg,
+		templates:       templates,
+		assets:          http.FileServer(http.FS(assetFS)),
+		limiter:         newRateLimiter(cfg.MaxUploadsPerHour, time.Hour),
+		settingsLimiter: newRateLimiter(12, 15*time.Minute),
+		writeGate:       make(chan struct{}, 4),
+		settings:        settings,
+		sessions:        newSessionStore(),
+		now:             time.Now,
 	}
 	return s.securityHeaders(http.HandlerFunc(s.route)), nil
 }
@@ -126,6 +137,14 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleMediaList(w, r)
 	case r.URL.Path == "/api/upload" && r.Method == http.MethodPost:
 		s.handleUpload(w, r)
+	case r.URL.Path == "/api/settings/login" && r.Method == http.MethodPost:
+		s.handleSettingsLogin(w, r)
+	case r.URL.Path == "/api/settings/logout" && r.Method == http.MethodPost:
+		s.handleSettingsLogout(w, r)
+	case r.URL.Path == "/api/settings" && (r.Method == http.MethodGet || r.Method == http.MethodPost):
+		s.handleSettings(w, r)
+	case r.URL.Path == "/api/settings/media" && r.Method == http.MethodPost:
+		s.handleModerationUpdate(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -270,10 +289,17 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if err := s.appendMetadata(metadata); err != nil {
 		log.Printf("append metadata for %s: %v", metadata.StoredName, err)
 	}
+	pending, err := s.settings.recordUpload(metadata.StoredName)
+	if err != nil {
+		s.removeStoredUpload(metadata.StoredName)
+		log.Printf("record moderation state for %s: %v", metadata.StoredName, err)
+		writeJSONError(w, http.StatusInternalServerError, "Speichern fehlgeschlagen. Bitte erneut versuchen.")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": metadata.StoredName})
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": metadata.StoredName, "pending": pending})
 }
 
 func (s *Server) removeStoredUpload(name string) {
@@ -387,28 +413,35 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(filepath.Join(s.cfg.UploadDir, item.StoredName)); err != nil {
 			continue
 		}
-		kind := "video"
-		if strings.HasPrefix(item.ContentType, "image/") {
-			kind = "image"
+		if !s.settings.isPublic(item.StoredName) {
+			continue
 		}
-		items = append(items, publicMedia{
-			ID:          item.StoredName,
-			URL:         "/m/" + url.PathEscape(token) + "/" + url.PathEscape(item.StoredName),
-			Kind:        kind,
-			ContentType: item.ContentType,
-			Size:        item.Size,
-			GuestName:   item.GuestName,
-			UploadedAt:  item.UploadedAt,
-			IsChallenge: item.IsChallenge,
-			Challenge:   item.Challenge,
-			ChallengeBy: item.ChallengeBy,
-		})
+		items = append(items, s.toPublicMedia(item))
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UploadedAt > items[j].UploadedAt })
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+	_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "slideshow_style": s.settings.snapshot().SlideshowStyle})
+}
+
+func (s *Server) toPublicMedia(item uploadMetadata) publicMedia {
+	kind := "video"
+	if strings.HasPrefix(item.ContentType, "image/") {
+		kind = "image"
+	}
+	return publicMedia{
+		ID:          item.StoredName,
+		URL:         "/m/" + url.PathEscape(s.cfg.UploadToken) + "/" + url.PathEscape(item.StoredName),
+		Kind:        kind,
+		ContentType: item.ContentType,
+		Size:        item.Size,
+		GuestName:   item.GuestName,
+		UploadedAt:  item.UploadedAt,
+		IsChallenge: item.IsChallenge,
+		Challenge:   item.Challenge,
+		ChallengeBy: item.ChallengeBy,
+	}
 }
 
 func (s *Server) readMetadata() ([]uploadMetadata, error) {
@@ -450,12 +483,16 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !s.settings.isPublic(name) && !s.validSettingsSession(r) {
+		http.NotFound(w, r)
+		return
+	}
 	path := filepath.Join(s.cfg.UploadDir, name)
 	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Content-Disposition", "inline")
 	http.ServeFile(w, r, path)
 }
@@ -575,9 +612,14 @@ func cleanText(value string, limit int) string {
 }
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]any{"ok": false, "error": message})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": message})
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func verifyWritable(dir string) error {

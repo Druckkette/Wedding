@@ -23,6 +23,7 @@ func testConfig(t *testing.T) Config {
 		UploadToken:       testToken,
 		EventTitle:        "Test Hochzeit",
 		EventSubtitle:     "Test subtitle",
+		SettingsPassword:  "test-settings-password",
 		MaxUploadsPerHour: 10,
 		ReadHeaderTimeout: time.Second,
 		ReadTimeout:       time.Minute,
@@ -46,6 +47,7 @@ func TestUploadPageRequiresToken(t *testing.T) {
 		{"/u/" + testToken, http.StatusOK},
 		{"/u/" + testToken + "/gallery", http.StatusOK},
 		{"/u/" + testToken + "/slideshow", http.StatusOK},
+		{"/u/" + testToken + "/settings", http.StatusOK},
 		{"/u/" + testToken + "/unknown", http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(http.MethodGet, test.path, nil)
@@ -264,15 +266,173 @@ func TestChallengeRejectsVideoAndIncompleteDetails(t *testing.T) {
 			if res.Code != http.StatusBadRequest {
 				t.Fatalf("got %d: %s", res.Code, res.Body.String())
 			}
-			files, err := os.ReadDir(cfg.UploadDir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(files) != 0 {
-				t.Fatalf("rejected challenge left %d file(s)", len(files))
+			if count := countStoredMedia(t, cfg.UploadDir); count != 0 {
+				t.Fatalf("rejected challenge left %d media file(s)", count)
 			}
 		})
 	}
+}
+
+func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
+	cfg := testConfig(t)
+	handler, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, jsonRequest(t, http.MethodGet, "/api/settings", nil, nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("settings without login: got %d", unauthorized.Code)
+	}
+
+	wrongLogin := httptest.NewRecorder()
+	handler.ServeHTTP(wrongLogin, jsonRequest(t, http.MethodPost, "/api/settings/login", map[string]any{"password": "wrong-password"}, nil))
+	if wrongLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong login: got %d", wrongLogin.Code)
+	}
+	cookie := settingsLogin(t, handler, "test-settings-password")
+
+	moderationEnabled := true
+	update := jsonRequest(t, http.MethodPost, "/api/settings", map[string]any{
+		"moderation_enabled": moderationEnabled,
+		"slideshow_style":    "polaroid",
+	}, cookie)
+	updateRes := httptest.NewRecorder()
+	handler.ServeHTTP(updateRes, update)
+	if updateRes.Code != http.StatusOK {
+		t.Fatalf("settings update: got %d: %s", updateRes.Code, updateRes.Body.String())
+	}
+
+	jpeg := append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, bytes.Repeat([]byte{0x35}, 700)...)
+	uploadRes := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRes, uploadRequest(t, "moderated.jpg", jpeg, testToken))
+	if uploadRes.Code != http.StatusCreated || !strings.Contains(uploadRes.Body.String(), `"pending":true`) {
+		t.Fatalf("moderated upload: got %d: %s", uploadRes.Code, uploadRes.Body.String())
+	}
+
+	publicListRes := httptest.NewRecorder()
+	handler.ServeHTTP(publicListRes, jsonRequest(t, http.MethodGet, "/api/media", nil, nil))
+	var publicPayload struct {
+		Items          []publicMedia `json:"items"`
+		SlideshowStyle string        `json:"slideshow_style"`
+	}
+	if err := json.NewDecoder(publicListRes.Body).Decode(&publicPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(publicPayload.Items) != 0 || publicPayload.SlideshowStyle != "polaroid" {
+		t.Fatalf("unexpected public payload: %+v", publicPayload)
+	}
+
+	settingsRes := httptest.NewRecorder()
+	handler.ServeHTTP(settingsRes, jsonRequest(t, http.MethodGet, "/api/settings", nil, cookie))
+	var settingsPayload struct {
+		Items []adminMedia `json:"items"`
+	}
+	if err := json.NewDecoder(settingsRes.Body).Decode(&settingsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(settingsPayload.Items) != 1 || settingsPayload.Items[0].Status != "pending" {
+		t.Fatalf("unexpected moderation queue: %+v", settingsPayload.Items)
+	}
+	item := settingsPayload.Items[0]
+	publicMediaRes := httptest.NewRecorder()
+	handler.ServeHTTP(publicMediaRes, httptest.NewRequest(http.MethodGet, item.URL, nil))
+	if publicMediaRes.Code != http.StatusNotFound {
+		t.Fatalf("pending media was public: got %d", publicMediaRes.Code)
+	}
+	adminMediaReq := httptest.NewRequest(http.MethodGet, item.URL, nil)
+	adminMediaReq.AddCookie(cookie)
+	adminMediaRes := httptest.NewRecorder()
+	handler.ServeHTTP(adminMediaRes, adminMediaReq)
+	if adminMediaRes.Code != http.StatusOK {
+		t.Fatalf("pending media unavailable in settings: got %d", adminMediaRes.Code)
+	}
+
+	approveRes := httptest.NewRecorder()
+	handler.ServeHTTP(approveRes, jsonRequest(t, http.MethodPost, "/api/settings/media", map[string]any{"id": item.ID, "status": "approved"}, cookie))
+	if approveRes.Code != http.StatusOK {
+		t.Fatalf("approve media: got %d: %s", approveRes.Code, approveRes.Body.String())
+	}
+	approvedListRes := httptest.NewRecorder()
+	handler.ServeHTTP(approvedListRes, jsonRequest(t, http.MethodGet, "/api/media", nil, nil))
+	if err := json.NewDecoder(approvedListRes.Body).Decode(&publicPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(publicPayload.Items) != 1 {
+		t.Fatalf("approved media missing from gallery: %+v", publicPayload.Items)
+	}
+
+	passwordRes := httptest.NewRecorder()
+	handler.ServeHTTP(passwordRes, jsonRequest(t, http.MethodPost, "/api/settings", map[string]any{
+		"current_password": "test-settings-password",
+		"new_password":     "new-private-password",
+	}, cookie))
+	if passwordRes.Code != http.StatusOK {
+		t.Fatalf("password update: got %d: %s", passwordRes.Code, passwordRes.Body.String())
+	}
+	oldLogin := httptest.NewRecorder()
+	handler.ServeHTTP(oldLogin, jsonRequest(t, http.MethodPost, "/api/settings/login", map[string]any{"password": "test-settings-password"}, nil))
+	if oldLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("old password still accepted: got %d", oldLogin.Code)
+	}
+	_ = settingsLogin(t, handler, "new-private-password")
+
+	settingsFile, err := os.ReadFile(filepath.Join(cfg.UploadDir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(settingsFile, []byte("test-settings-password")) || bytes.Contains(settingsFile, []byte("new-private-password")) {
+		t.Fatal("settings password was stored in plaintext")
+	}
+}
+
+func settingsLogin(t *testing.T, handler http.Handler, password string) *http.Cookie {
+	t.Helper()
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, jsonRequest(t, http.MethodPost, "/api/settings/login", map[string]any{"password": password}, nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("settings login: got %d: %s", res.Code, res.Body.String())
+	}
+	cookies := res.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != settingsSessionCookie {
+		t.Fatalf("settings login did not set session cookie: %+v", cookies)
+	}
+	return cookies[0]
+}
+
+func jsonRequest(t *testing.T, method, path string, payload any, cookie *http.Cookie) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	if payload != nil {
+		if err := json.NewEncoder(&body).Encode(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(method, path, &body)
+	req.Header.Set("X-Upload-Token", testToken)
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	return req
+}
+
+func countStoredMedia(t *testing.T, dir string) int {
+	t.Helper()
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, file := range files {
+		if storedMediaName.MatchString(file.Name()) {
+			count++
+		}
+	}
+	return count
 }
 
 func uploadRequest(t *testing.T, filename string, content []byte, token string) *http.Request {

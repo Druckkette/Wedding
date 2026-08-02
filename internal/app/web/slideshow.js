@@ -16,6 +16,7 @@
   const pauseButton = document.querySelector('#pause-button');
   const nextButton = document.querySelector('#next-button');
   const fullscreenButton = document.querySelector('#fullscreen-button');
+  const slideshow = document.querySelector('#slideshow');
   const known = new Set();
   const priority = [];
   let items = [];
@@ -24,6 +25,7 @@
   let paused = false;
   let running = false;
   let advanceSignal = 0;
+  let appearanceIndex = 0;
 
   for (let index = 0; index < 36; index += 1) {
     const piece = document.createElement('i');
@@ -44,20 +46,31 @@
     }
   }
 
-  function createMedia(item) {
-    const media = document.createElement(item.kind === 'video' ? 'video' : 'img');
-    media.className = `slide-media${item.is_challenge ? ' challenge-frame' : ''}`;
+  function createSlide(item) {
+    const card = document.createElement('div');
+    const directions = ['polaroid-left', 'polaroid-right', 'polaroid-bottom'];
+    card.className = `slide-card ${directions[appearanceIndex % directions.length]}${item.is_challenge ? ' challenge-card' : ''}`;
+    appearanceIndex += 1;
+    const media = document.createElement('img');
+    media.className = 'slide-media';
     media.src = item.url;
-    if (item.kind === 'video') {
-      media.autoplay = true;
-      media.muted = true;
-      media.loop = true;
-      media.playsInline = true;
-      media.preload = 'auto';
-    } else {
-      media.alt = item.is_challenge ? `Challenge: ${item.challenge}` : 'Hochzeitsfoto';
+    media.alt = item.is_challenge ? `Challenge: ${item.challenge}` : 'Hochzeitsfoto';
+    card.append(media);
+    if (item.is_challenge) {
+      const ribbon = document.createElement('span');
+      ribbon.className = 'challenge-ribbon';
+      ribbon.textContent = '★ FOTO-CHALLENGE ★';
+      const seal = document.createElement('span');
+      seal.className = 'challenge-seal';
+      seal.textContent = 'GESCHAFFT';
+      card.append(ribbon, seal);
     }
-    return media;
+    const note = document.createElement('span');
+    note.className = 'polaroid-note';
+    const submittedBy = item.guest_name || item.challenge_by;
+    note.textContent = submittedBy ? `Eingereicht von ${submittedBy}` : 'Eingereicht von einem Hochzeitsgast';
+    card.append(note);
+    return card;
   }
 
   async function celebrate(item) {
@@ -70,7 +83,7 @@
 
   async function show(item, isNew) {
     waiting.hidden = true;
-    stage.replaceChildren(createMedia(item));
+    stage.replaceChildren(createSlide(item));
     newBadge.hidden = !isNew;
     caption.hidden = true;
     if (item.is_challenge) {
@@ -82,7 +95,7 @@
     }
     const position = items.findIndex((candidate) => candidate.id === item.id);
     counter.textContent = position >= 0 ? `${position + 1} / ${items.length}` : `${items.length} Aufnahmen`;
-    await waitForSlide(item.kind === 'video' ? 15000 : 9500);
+    await waitForSlide(9500);
     newBadge.hidden = true;
   }
 
@@ -96,6 +109,7 @@
       }
       let item;
       let isNew = false;
+      while (priority.length && !items.some((candidate) => candidate.id === priority[0].id)) priority.shift();
       if (priority.length) {
         item = priority.shift();
         isNew = true;
@@ -113,17 +127,19 @@
       const response = await fetch('/api/media', { headers: { 'X-Upload-Token': token }, cache: 'no-store' });
       if (!response.ok) throw new Error('slideshow request failed');
       const payload = await response.json();
+      const pictures = payload.items.filter((item) => item.kind === 'image');
+      slideshow.classList.toggle('polaroid-mode', payload.slideshow_style === 'polaroid');
       if (!initialized) {
-        payload.items.forEach((item) => known.add(item.id));
+        pictures.forEach((item) => known.add(item.id));
         initialized = true;
       } else {
-        const additions = payload.items.filter((item) => !known.has(item.id)).reverse();
+        const additions = pictures.filter((item) => !known.has(item.id)).reverse();
         additions.forEach((item) => {
           known.add(item.id);
           priority.push(item);
         });
       }
-      items = payload.items;
+      items = pictures;
       liveIndicator.classList.remove('offline');
       liveLabel.textContent = 'Live verbunden';
       if (items.length === 0) counter.textContent = 'Warte auf Aufnahmen';

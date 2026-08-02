@@ -12,8 +12,11 @@ Eine kleine, für iOS und Android optimierte Web-App, über die Hochzeitsgäste 
 - Originaldateien ohne Komprimierung oder Konvertierung
 - Geheimer, QR-Code-tauglicher Upload-Link
 - Private, automatisch aktualisierte Galerie für Fotos und Videos
-- Beamer-Diashow mit Vollbild, Dauerrotation und bevorzugter Einblendung neuer Aufnahmen
-- Challenge-Bilder mit Aufgabe und Namen der Teilnehmenden sowie eigener Beamer-Animation
+- Beamer-Diashow nur für Fotos, mit Vollbild, Dauerrotation und bevorzugter Einblendung neuer Aufnahmen
+- Normaler Beamer-Stil oder hereinfliegende Polaroids
+- Challenge-Bilder mit Aufgabe, Namen, eigener Animation und deutlich erkennbarem Spezialrahmen
+- Passwortgeschützte Settings mit optionaler Freigabe neuer Uploads
+- Einzelne laufende Uploads lassen sich unabhängig abbrechen
 - Medienzugriff ausschließlich über den geheimen Event-Link
 - Serverseitige Typprüfung, Rate-Limit und atomisches Speichern
 - Metadaten als `uploads.jsonl` neben den Dateien
@@ -32,6 +35,7 @@ Danach sind diese Seiten erreichbar:
 - Upload: `http://localhost:18787/u/<UPLOAD_TOKEN>`
 - Galerie: `http://localhost:18787/u/<UPLOAD_TOKEN>/gallery`
 - Beamer-Diashow: `http://localhost:18787/u/<UPLOAD_TOKEN>/slideshow`
+- Settings: `http://localhost:18787/u/<UPLOAD_TOKEN>/settings`
 
 Im produktiven Einsatz gehört die App hinter einen HTTPS-Reverse-Proxy; der Container-Port wird absichtlich nur an `127.0.0.1` gebunden. Die Galerie und Diashow fragen neue Aufnahmen automatisch ab. Neue Challenge-Bilder unterbrechen die reguläre Reihenfolge kurz für die Challenge-Animation und werden danach direkt angezeigt.
 
@@ -40,6 +44,7 @@ Im produktiven Einsatz gehört die App hinter einen HTTPS-Reverse-Proxy; der Con
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
 | `UPLOAD_TOKEN` | – | Pflichtwert mit mindestens 32 URL-sicheren Zeichen |
+| `SETTINGS_PASSWORD` | – | Initiales Settings-Passwort mit mindestens 6 Zeichen; spätere Änderungen werden gehasht auf dem NAS gespeichert |
 | `EVENT_TITLE` | `Unsere Hochzeit` | Überschrift der Upload-Seite |
 | `EVENT_SUBTITLE` | siehe `.env.example` | Einladungstext |
 | `MAX_UPLOADS_PER_HOUR` | `120` | Schutzlimit je IP-Adresse |
@@ -57,4 +62,4 @@ docker compose logs --tail=100
 curl -fsS http://127.0.0.1:18787/healthz
 ```
 
-Backups sollten mindestens den Ordner aus `NAS_UPLOAD_DIR` umfassen. Die App bietet absichtlich keine Löschfunktion.
+Backups sollten mindestens den Ordner aus `NAS_UPLOAD_DIR` umfassen. Dort liegen neben den Medien auch `uploads.jsonl` und die passwortgeschützten Moderationseinstellungen in `settings.json`. Ausgeblendete Medien werden nicht gelöscht und können in Settings wieder freigegeben werden.

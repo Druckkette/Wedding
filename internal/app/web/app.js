@@ -37,7 +37,7 @@
       if (!supportedByType && !supportedByName) return;
       if (known.has(keyFor(file))) return;
       const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|mpeg|mpg|3gp|3gpp|ogv)$/i.test(file.name);
-      entries.push({ file, url: URL.createObjectURL(file), isVideo, state: 'ready', progress: 0 });
+      entries.push({ file, url: URL.createObjectURL(file), isVideo, state: 'ready', progress: 0, request: null, cancelled: false, pending: false });
       known.add(keyFor(file));
     });
     render();
@@ -81,10 +81,10 @@
       const remove = document.createElement('button');
       remove.className = 'remove-button';
       remove.type = 'button';
-      remove.setAttribute('aria-label', `${entry.file.name} entfernen`);
+      remove.setAttribute('aria-label', entry.state === 'uploading' ? `Upload von ${entry.file.name} stoppen` : `${entry.file.name} entfernen`);
       remove.textContent = '×';
-      remove.disabled = uploading;
-      remove.addEventListener('click', () => removeEntry(index));
+      remove.disabled = entry.state === 'done';
+      remove.addEventListener('click', () => removeEntry(entry));
       li.append(preview, info, remove);
       fileList.append(li);
     });
@@ -101,9 +101,14 @@
     return formatBytes(entry.file.size);
   }
 
-  function removeEntry(index) {
-    URL.revokeObjectURL(entries[index].url);
-    entries.splice(index, 1);
+  function removeEntry(entry) {
+    entry.cancelled = true;
+    if (entry.request) entry.request.abort();
+    const index = entries.indexOf(entry);
+    if (index >= 0) {
+      URL.revokeObjectURL(entry.url);
+      entries.splice(index, 1);
+    }
     render();
   }
 
@@ -142,6 +147,14 @@
 
   function uploadFile(entry) {
     return new Promise((resolve) => {
+      let settled = false;
+      const finish = (success) => {
+        if (settled) return;
+        settled = true;
+        entry.request = null;
+        render();
+        resolve(success);
+      };
       const form = new FormData();
       form.append('guest_name', guestName.value.trim());
       form.append('is_challenge', challengeToggle.checked ? 'true' : 'false');
@@ -151,6 +164,7 @@
       }
       form.append('media', entry.file, entry.file.name);
       const request = new XMLHttpRequest();
+      entry.request = request;
       request.open('POST', '/api/upload');
       request.setRequestHeader('X-Upload-Token', token);
       request.upload.addEventListener('progress', (event) => {
@@ -164,25 +178,25 @@
         if (request.status >= 200 && request.status < 300) {
           entry.state = 'done';
           entry.progress = 100;
+          entry.pending = Boolean(body.pending);
         } else {
           entry.state = 'failed';
           entry.error = body.error || 'Upload fehlgeschlagen. Bitte erneut versuchen.';
         }
-        render();
-        resolve(entry.state === 'done');
+        finish(entry.state === 'done');
       });
       request.addEventListener('error', () => {
+        if (entry.cancelled) return finish(false);
         entry.state = 'failed';
         entry.error = 'Keine Verbindung. Bitte WLAN oder Mobilfunk prüfen.';
-        render();
-        resolve(false);
+        finish(false);
       });
       request.addEventListener('timeout', () => {
         entry.state = 'failed';
         entry.error = 'Der Upload hat zu lange gedauert. Bitte erneut versuchen.';
-        render();
-        resolve(false);
+        finish(false);
       });
+      request.addEventListener('abort', () => finish(false));
       request.send(form);
     });
   }
@@ -198,6 +212,7 @@
     render();
 
     for (const entry of pending) {
+      if (!entries.includes(entry) || entry.cancelled) continue;
       entry.state = 'uploading';
       entry.progress = 0;
       render();
@@ -208,12 +223,20 @@
 
     uploading = false;
     const failures = entries.filter((entry) => entry.state === 'failed');
+    if (entries.length === 0) {
+      uploadButtonLabel.textContent = 'Dateien hochladen';
+      render();
+      return;
+    }
     if (failures.length === 0 && completed > 0) {
       selection.hidden = true;
       result.hidden = false;
-      resultMessage.textContent = challengeUpload
-        ? 'Euer Challenge-Bild wurde gespeichert und erscheint gleich auf dem Beamer.'
-        : `${completed} ${completed === 1 ? 'Datei wurde' : 'Dateien wurden'} sicher gespeichert.`;
+      const awaitingApproval = entries.some((entry) => entry.state === 'done' && entry.pending);
+      resultMessage.textContent = awaitingApproval
+        ? `${completed} ${completed === 1 ? 'Datei wartet' : 'Dateien warten'} jetzt auf die Freigabe durch das Hochzeitsteam.`
+        : challengeUpload
+          ? 'Euer Challenge-Bild wurde gespeichert und erscheint gleich auf dem Beamer.'
+          : `${completed} ${completed === 1 ? 'Datei wurde' : 'Dateien wurden'} sicher gespeichert.`;
       result.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
       uploadButtonLabel.textContent = failures.length ? 'Fehlgeschlagene erneut senden' : 'Dateien hochladen';

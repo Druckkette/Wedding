@@ -15,6 +15,7 @@ type Config struct {
 	UploadToken       string
 	EventTitle        string
 	EventSubtitle     string
+	SettingsPassword  string
 	MaxUploadsPerHour int
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
@@ -29,6 +30,7 @@ func ConfigFromEnv() (Config, error) {
 		UploadToken:       strings.TrimSpace(os.Getenv("UPLOAD_TOKEN")),
 		EventTitle:        envOr("EVENT_TITLE", "Unsere Hochzeit"),
 		EventSubtitle:     envOr("EVENT_SUBTITLE", "Haltet eure schönsten Momente mit uns fest."),
+		SettingsPassword:  strings.TrimSpace(os.Getenv("SETTINGS_PASSWORD")),
 		MaxUploadsPerHour: 120,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       0,
@@ -49,6 +51,9 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if strings.ContainsAny(cfg.UploadToken, "/?#") {
 		return Config{}, errors.New("UPLOAD_TOKEN must be URL-path safe")
+	}
+	if len(cfg.SettingsPassword) < 6 || len(cfg.SettingsPassword) > 128 {
+		return Config{}, errors.New("SETTINGS_PASSWORD must contain between 6 and 128 characters")
 	}
 	return cfg, nil
 }

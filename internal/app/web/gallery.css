@@ -15,8 +15,11 @@
 .gallery-card::after { content: ""; position: absolute; inset: auto 0 0; height: 40%; pointer-events: none; background: linear-gradient(transparent, rgba(14,20,16,.55)); opacity: 0; transition: opacity .2s; }
 .gallery-card:hover::after { opacity: 1; }
 .gallery-card.is-new { animation: gallery-arrival .8s cubic-bezier(.2,.8,.2,1); }
+.gallery-card.is-challenge { padding: 7px; border: 3px solid #d2b25f; background: repeating-linear-gradient(135deg, #fff8df 0 9px, #e8d59a 9px 13px); box-shadow: 0 0 0 2px #fff8df, 0 8px 28px rgba(100,75,18,.28); }
+.gallery-card.is-challenge img { border: 2px solid rgba(92,67,17,.45); }
+.gallery-card.is-challenge::before { content: "★"; position: absolute; top: 13px; left: 13px; z-index: 3; display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: #21392c; color: #f4d985; box-shadow: 0 3px 10px rgba(0,0,0,.25); font-size: 1rem; }
 .media-kind { position: absolute; top: 8px; right: 8px; z-index: 1; padding: 5px 8px; border-radius: 999px; background: rgba(18,26,21,.72); color: white; font-size: .62rem; font-weight: 700; }
-.challenge-badge { position: absolute; left: 8px; bottom: 8px; z-index: 2; max-width: calc(100% - 16px); padding: 7px 9px; border-radius: 3px; background: rgba(184,127,120,.92); color: white; font-size: .67rem; font-weight: 700; text-align: left; }
+.challenge-badge { position: absolute; left: 15px; bottom: 15px; z-index: 2; max-width: calc(100% - 30px); padding: 8px 10px; border-radius: 2px; background: rgba(33,57,44,.94); color: #f8df94; font-size: .64rem; font-weight: 800; letter-spacing: .04em; text-align: left; }
 .gallery-empty { padding: 70px 20px; border: 1px dashed rgba(102,121,101,.35); background: rgba(255,253,249,.55); text-align: center; }
 .gallery-empty > span { color: var(--rose); font-size: 2.4rem; }
 .gallery-empty h2 { margin: 12px 0 8px; font-size: 1.8rem; }

@@ -10,7 +10,7 @@
   const lightboxMedia = document.querySelector('#lightbox-media');
   const lightboxCaption = document.querySelector('#lightbox-caption');
   const lightboxClose = document.querySelector('#lightbox-close');
-  const known = new Set();
+  const cards = new Map();
   let initialized = false;
 
   function setLiveStatus(isOnline) {
@@ -66,7 +66,7 @@
 
   function createCard(item, isNew) {
     const card = document.createElement('button');
-    card.className = `gallery-card${isNew ? ' is-new' : ''}`;
+    card.className = `gallery-card${isNew ? ' is-new' : ''}${item.is_challenge ? ' is-challenge' : ''}`;
     card.type = 'button';
     card.setAttribute('aria-label', item.is_challenge ? `Challenge-Bild: ${item.challenge}` : 'Aufnahme öffnen');
     card.append(mediaElement(item));
@@ -79,7 +79,7 @@
     if (item.is_challenge) {
       const badge = document.createElement('span');
       badge.className = 'challenge-badge';
-      badge.textContent = `★ ${item.challenge_by}`;
+      badge.textContent = `★ FOTO-CHALLENGE · ${item.challenge_by}`;
       card.append(badge);
     }
     card.addEventListener('click', () => openLightbox(item));
@@ -91,11 +91,18 @@
       const response = await fetch('/api/media', { headers: { 'X-Upload-Token': token }, cache: 'no-store' });
       if (!response.ok) throw new Error('gallery request failed');
       const { items } = await response.json();
-      const additions = items.filter((item) => !known.has(item.id));
-      additions.slice().reverse().forEach((item) => {
-        known.add(item.id);
-        grid.prepend(createCard(item, initialized));
+      const currentIDs = new Set(items.map((item) => item.id));
+      cards.forEach((card, id) => {
+        if (!currentIDs.has(id)) {
+          card.remove();
+          cards.delete(id);
+        }
       });
+      const orderedCards = items.map((item) => {
+        if (!cards.has(item.id)) cards.set(item.id, createCard(item, initialized));
+        return cards.get(item.id);
+      });
+      grid.replaceChildren(...orderedCards);
       initialized = true;
       empty.hidden = items.length !== 0;
       grid.hidden = items.length === 0;

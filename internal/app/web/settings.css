@@ -55,10 +55,12 @@
 .moderation-info { display: flex; min-width: 0; padding: 14px; flex-direction: column; }
 .moderation-info strong { font-family: Georgia, serif; font-size: 1rem; font-weight: 400; }
 .moderation-info p { margin: 6px 0 0; color: var(--muted); font-size: .73rem; line-height: 1.4; }
-.moderation-actions { display: flex; margin-top: auto; padding-top: 12px; gap: 6px; }
+.moderation-actions { display: flex; margin-top: auto; padding-top: 12px; flex-wrap: wrap; gap: 6px; }
 .moderation-actions button { min-height: 37px; margin: 0; padding: 0 10px; font-size: .68rem; }
 .moderation-actions .reject { border: 1px solid rgba(169,72,66,.35); background: transparent; color: var(--danger); }
 .moderation-actions .pending { border: 1px solid rgba(102,121,101,.35); background: transparent; color: var(--sage); }
+.moderation-actions .delete { border: 1px solid var(--danger); background: var(--danger); color: white; }
+.moderation-actions button:disabled { cursor: wait; opacity: .55; }
 .queue-empty { margin: 28px 0 4px; padding: 30px; border: 1px dashed #d4d4cb; color: var(--muted); text-align: center; }
 .password-card { max-width: 650px; }
 @media (max-width: 760px) {

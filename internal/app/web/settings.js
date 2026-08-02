@@ -91,6 +91,13 @@
     if (item.status !== 'pending') actions.append(actionButton('Zur Prüfung', 'pending', 'pending'));
     if (item.status !== 'rejected') actions.append(actionButton('Ausblenden', 'rejected', 'reject'));
 
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.textContent = 'Löschen';
+    deleteButton.className = 'delete';
+    deleteButton.addEventListener('click', () => deleteMedia(item, deleteButton));
+    actions.append(deleteButton);
+
     function actionButton(label, status, className = '') {
       const button = document.createElement('button');
       button.type = 'button';
@@ -152,6 +159,21 @@
     try {
       await request('/api/settings/media', { method: 'POST', body: JSON.stringify({ id: item.id, status }) });
       item.status = status;
+      renderItems();
+    } catch (error) {
+      button.disabled = false;
+      if (error.status === 401) showLogin('Bitte erneut anmelden.');
+      else window.alert(error.message);
+    }
+  }
+
+  async function deleteMedia(item, button) {
+    const confirmed = window.confirm('Diese Aufnahme wird dauerhaft vom NAS gelöscht. Wirklich löschen?');
+    if (!confirmed) return;
+    button.disabled = true;
+    try {
+      await request('/api/settings/media/delete', { method: 'POST', body: JSON.stringify({ id: item.id }) });
+      items = items.filter((candidate) => candidate.id !== item.id);
       renderItems();
     } catch (error) {
       button.disabled = false;

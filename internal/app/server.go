@@ -145,6 +145,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleSettings(w, r)
 	case r.URL.Path == "/api/settings/media" && r.Method == http.MethodPost:
 		s.handleModerationUpdate(w, r)
+	case r.URL.Path == "/api/settings/media/delete" && r.Method == http.MethodPost:
+		s.handleMediaDelete(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -390,6 +392,96 @@ func (s *Server) appendMetadata(metadata uploadMetadata) error {
 	}
 	defer file.Close()
 	return json.NewEncoder(file).Encode(metadata)
+}
+
+func (s *Server) deleteMedia(name string) error {
+	s.metaMu.Lock()
+	defer s.metaMu.Unlock()
+
+	mediaPath := filepath.Join(s.cfg.UploadDir, name)
+	info, err := os.Stat(mediaPath)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return os.ErrNotExist
+	}
+
+	randomPart, err := randomHex(8)
+	if err != nil {
+		return err
+	}
+	stagedPath := filepath.Join(s.cfg.UploadDir, ".deleting-"+randomPart)
+	if err := os.Rename(mediaPath, stagedPath); err != nil {
+		return err
+	}
+	restoreMedia := true
+	defer func() {
+		if restoreMedia {
+			if err := os.Rename(stagedPath, mediaPath); err != nil {
+				log.Printf("restore media after failed deletion: %v", err)
+			}
+		}
+	}()
+
+	metadataPath := filepath.Join(s.cfg.UploadDir, "uploads.jsonl")
+	metadataFile, err := os.Open(metadataPath)
+	if errors.Is(err, os.ErrNotExist) {
+		restoreMedia = false
+		return os.Remove(stagedPath)
+	}
+	if err != nil {
+		return err
+	}
+
+	temp, err := os.CreateTemp(s.cfg.UploadDir, ".metadata-delete-*")
+	if err != nil {
+		metadataFile.Close()
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+
+	scanner := bufio.NewScanner(metadataFile)
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for scanner.Scan() {
+		line := append([]byte(nil), scanner.Bytes()...)
+		var item uploadMetadata
+		if json.Unmarshal(line, &item) == nil && item.StoredName == name {
+			continue
+		}
+		if _, err := temp.Write(append(line, '\n')); err != nil {
+			metadataFile.Close()
+			temp.Close()
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		metadataFile.Close()
+		temp.Close()
+		return err
+	}
+	if err := metadataFile.Close(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Chmod(0o640); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, metadataPath); err != nil {
+		return err
+	}
+
+	restoreMedia = false
+	return os.Remove(stagedPath)
 }
 
 func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -361,6 +362,51 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	}
 	if len(publicPayload.Items) != 1 {
 		t.Fatalf("approved media missing from gallery: %+v", publicPayload.Items)
+	}
+
+	unauthorizedDeleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedDeleteRes, jsonRequest(t, http.MethodPost, "/api/settings/media/delete", map[string]any{"id": item.ID}, nil))
+	if unauthorizedDeleteRes.Code != http.StatusUnauthorized {
+		t.Fatalf("delete without login: got %d", unauthorizedDeleteRes.Code)
+	}
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, jsonRequest(t, http.MethodPost, "/api/settings/media/delete", map[string]any{"id": item.ID}, cookie))
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete media: got %d: %s", deleteRes.Code, deleteRes.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(cfg.UploadDir, item.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted media still exists: %v", err)
+	}
+	deletedMediaRes := httptest.NewRecorder()
+	handler.ServeHTTP(deletedMediaRes, httptest.NewRequest(http.MethodGet, item.URL, nil))
+	if deletedMediaRes.Code != http.StatusNotFound {
+		t.Fatalf("deleted media remains available: got %d", deletedMediaRes.Code)
+	}
+	afterDeleteSettingsRes := httptest.NewRecorder()
+	handler.ServeHTTP(afterDeleteSettingsRes, jsonRequest(t, http.MethodGet, "/api/settings", nil, cookie))
+	if err := json.NewDecoder(afterDeleteSettingsRes.Body).Decode(&settingsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(settingsPayload.Items) != 0 {
+		t.Fatalf("deleted media remains in settings: %+v", settingsPayload.Items)
+	}
+	metadataAfterDelete, err := os.ReadFile(filepath.Join(cfg.UploadDir, "uploads.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(metadataAfterDelete, []byte(item.ID)) {
+		t.Fatal("deleted media remains in uploads.jsonl")
+	}
+	settingsAfterDelete, err := os.ReadFile(filepath.Join(cfg.UploadDir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persistedAfterDelete persistedSettings
+	if err := json.Unmarshal(settingsAfterDelete, &persistedAfterDelete); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := persistedAfterDelete.Media[item.ID]; exists {
+		t.Fatal("deleted media remains in settings.json")
 	}
 
 	passwordRes := httptest.NewRecorder()

@@ -174,6 +174,21 @@ func (s *settingsStore) setMediaStatus(name, status string) error {
 	return nil
 }
 
+func (s *settingsStore) removeMedia(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.state.Media[name]; !exists {
+		return nil
+	}
+	next := cloneSettings(s.state)
+	delete(next.Media, name)
+	if err := s.saveLocked(next); err != nil {
+		return err
+	}
+	s.state = next
+	return nil
+}
+
 func (s *settingsStore) status(name string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -398,6 +413,36 @@ func (s *Server) handleModerationUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": update.Status})
+}
+
+func (s *Server) handleMediaDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSettingsSession(w, r) {
+		return
+	}
+	if !sameOrigin(r) {
+		writeJSONError(w, http.StatusForbidden, "Anfrage nicht erlaubt.")
+		return
+	}
+	var request struct {
+		ID string `json:"id"`
+	}
+	if err := decodeJSON(r, &request); err != nil || !storedMediaName.MatchString(request.ID) {
+		writeJSONError(w, http.StatusBadRequest, "Ungültige Aufnahme.")
+		return
+	}
+	if err := s.deleteMedia(request.ID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSONError(w, http.StatusNotFound, "Aufnahme wurde nicht gefunden.")
+			return
+		}
+		logSettingsError("delete media", err)
+		writeJSONError(w, http.StatusInternalServerError, "Aufnahme konnte nicht gelöscht werden.")
+		return
+	}
+	if err := s.settings.removeMedia(request.ID); err != nil {
+		logSettingsError("remove deleted media from settings", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": request.ID})
 }
 
 func (s *Server) requireSettingsSession(w http.ResponseWriter, r *http.Request) bool {

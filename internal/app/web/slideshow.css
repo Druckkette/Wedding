@@ -40,7 +40,7 @@ button, a { font: inherit; }
 .confetti i:nth-child(4n) { background: var(--sage); }
 .new-badge { position: absolute; top: 28px; left: 50%; z-index: 3; padding: 10px 18px; border-radius: 999px; background: rgba(217,157,148,.92); color: #1a211c; font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transform: translateX(-50%); animation: badge-in .5s ease-out; }
 .slide-caption { position: absolute; bottom: 82px; left: 50%; z-index: 2; max-width: min(90%, 900px); padding: 12px 18px; border-radius: 3px; background: rgba(10,14,11,.72); color: rgba(255,255,255,.9); font-family: Georgia, serif; font-size: clamp(.9rem, 1.5vw, 1.2rem); text-align: center; transform: translateX(-50%); backdrop-filter: blur(8px); }
-.live-indicator, .slide-counter { position: absolute; top: 22px; z-index: 3; color: rgba(255,255,255,.58); font-size: .7rem; }
+.live-indicator, .slide-counter { position: absolute; top: 22px; z-index: 3; color: rgba(255,255,255,.58); font-size: .7rem; transition: opacity .3s, visibility .3s; }
 .live-indicator { left: 24px; display: flex; align-items: center; gap: 8px; }
 .live-indicator i { width: 7px; height: 7px; border-radius: 50%; background: #83c87d; box-shadow: 0 0 0 4px rgba(131,200,125,.12); }
 .live-indicator.offline i { background: #d68d82; }
@@ -49,6 +49,10 @@ button, a { font: inherit; }
 .slideshow:hover .slideshow-controls, .slideshow-controls:focus-within { opacity: 1; }
 .slideshow-controls button, .slideshow-controls a { padding: 9px 13px; border: 0; border-radius: 999px; background: transparent; color: rgba(255,255,255,.86); cursor: pointer; font-size: .72rem; text-decoration: none; }
 .slideshow-controls button:hover, .slideshow-controls a:hover { background: rgba(255,255,255,.12); }
+:fullscreen .slideshow-controls { opacity: 1; }
+:fullscreen .slideshow.fullscreen-ui-hidden .live-indicator,
+:fullscreen .slideshow.fullscreen-ui-hidden .slide-counter,
+:fullscreen .slideshow.fullscreen-ui-hidden .slideshow-controls { visibility: hidden; opacity: 0; pointer-events: none; }
 @keyframes slide-in { from { opacity: 0; transform: scale(.965); filter: blur(5px); } to { opacity: 1; transform: none; filter: none; } }
 @keyframes celebration-in { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: none; } }
 @keyframes badge-in { from { opacity: 0; transform: translate(-50%, -14px); } to { opacity: 1; transform: translate(-50%, 0); } }

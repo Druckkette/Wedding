@@ -16,6 +16,7 @@
   const pauseButton = document.querySelector('#pause-button');
   const nextButton = document.querySelector('#next-button');
   const fullscreenButton = document.querySelector('#fullscreen-button');
+  const controls = document.querySelector('.slideshow-controls');
   const slideshow = document.querySelector('#slideshow');
   const known = new Set();
   const priority = [];
@@ -27,6 +28,23 @@
   let advanceSignal = 0;
   let appearanceIndex = 0;
   let slideDurationMilliseconds = 10000;
+  let fullscreenUITimer = 0;
+
+  function scheduleFullscreenUIHide() {
+    window.clearTimeout(fullscreenUITimer);
+    if (!document.fullscreenElement) {
+      slideshow.classList.remove('fullscreen-ui-hidden');
+      return;
+    }
+    fullscreenUITimer = window.setTimeout(() => {
+      if (document.fullscreenElement) slideshow.classList.add('fullscreen-ui-hidden');
+    }, 3000);
+  }
+
+  function showFullscreenUI() {
+    slideshow.classList.remove('fullscreen-ui-hidden');
+    scheduleFullscreenUIHide();
+  }
 
   for (let index = 0; index < 36; index += 1) {
     const piece = document.createElement('i');
@@ -165,6 +183,11 @@
     if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
     else await document.exitFullscreen();
   });
+  document.addEventListener('fullscreenchange', showFullscreenUI);
+  window.addEventListener('mousemove', () => {
+    if (document.fullscreenElement) showFullscreenUI();
+  }, { passive: true });
+  controls.addEventListener('focusin', showFullscreenUI);
 
   if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(() => {});
   refresh();

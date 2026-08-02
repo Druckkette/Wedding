@@ -11,7 +11,10 @@ Eine kleine, für iOS und Android optimierte Web-App, über die Hochzeitsgäste 
 - Einzelner Fortschritt pro Datei und gezielter Wiederholungsversuch
 - Originaldateien ohne Komprimierung oder Konvertierung
 - Geheimer, QR-Code-tauglicher Upload-Link
-- Keine öffentliche Galerie und keine Download-Route
+- Private, automatisch aktualisierte Galerie für Fotos und Videos
+- Beamer-Diashow mit Vollbild, Dauerrotation und bevorzugter Einblendung neuer Aufnahmen
+- Challenge-Bilder mit Aufgabe und Namen der Teilnehmenden sowie eigener Beamer-Animation
+- Medienzugriff ausschließlich über den geheimen Event-Link
 - Serverseitige Typprüfung, Rate-Limit und atomisches Speichern
 - Metadaten als `uploads.jsonl` neben den Dateien
 - Unprivilegierter, schreibgeschützter Docker-Container
@@ -24,7 +27,13 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Danach ist die Seite unter `http://localhost:18787/u/<UPLOAD_TOKEN>` erreichbar. Im produktiven Einsatz gehört die App hinter einen HTTPS-Reverse-Proxy; der Container-Port wird absichtlich nur an `127.0.0.1` gebunden.
+Danach sind diese Seiten erreichbar:
+
+- Upload: `http://localhost:18787/u/<UPLOAD_TOKEN>`
+- Galerie: `http://localhost:18787/u/<UPLOAD_TOKEN>/gallery`
+- Beamer-Diashow: `http://localhost:18787/u/<UPLOAD_TOKEN>/slideshow`
+
+Im produktiven Einsatz gehört die App hinter einen HTTPS-Reverse-Proxy; der Container-Port wird absichtlich nur an `127.0.0.1` gebunden. Die Galerie und Diashow fragen neue Aufnahmen automatisch ab. Neue Challenge-Bilder unterbrechen die reguläre Reihenfolge kurz für die Challenge-Animation und werden danach direkt angezeigt.
 
 ## Konfiguration
 

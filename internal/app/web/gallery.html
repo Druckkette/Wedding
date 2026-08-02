@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f2ea">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="upload-token" content="{{.UploadToken}}">
+  <title>{{.Title}} – Galerie</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/gallery.css">
+</head>
+<body class="gallery-page">
+  <main class="gallery-shell">
+    <header class="gallery-header">
+      <p class="eyebrow">Gemeinsame Erinnerungen</p>
+      <h1>Unsere Galerie</h1>
+      <p>Alle Momente der Feier – neue Aufnahmen erscheinen automatisch.</p>
+      <nav class="page-nav" aria-label="Hochzeitsfotos">
+        <a href="/u/{{.UploadToken}}">Hochladen</a>
+        <a class="active" href="/u/{{.UploadToken}}/gallery">Galerie</a>
+        <a href="/u/{{.UploadToken}}/slideshow">Diashow</a>
+      </nav>
+    </header>
+
+    <section class="gallery-content" aria-live="polite">
+      <div class="gallery-status">
+        <strong id="media-count">Galerie wird geladen …</strong>
+        <span id="live-status"><i></i> Live</span>
+      </div>
+      <div class="gallery-grid" id="gallery-grid"></div>
+      <div class="gallery-empty" id="gallery-empty" hidden>
+        <span>♡</span>
+        <h2>Noch ganz still hier</h2>
+        <p>Das erste Foto wartet nur darauf, hochgeladen zu werden.</p>
+        <a href="/u/{{.UploadToken}}">Erste Aufnahme hochladen</a>
+      </div>
+    </section>
+  </main>
+
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Medienansicht" hidden>
+    <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Schließen">×</button>
+    <div class="lightbox-media" id="lightbox-media"></div>
+    <div class="lightbox-caption" id="lightbox-caption"></div>
+  </div>
+  <script src="/assets/gallery.js" defer></script>
+</body>
+</html>

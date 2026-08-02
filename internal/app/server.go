@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,10 +29,11 @@ import (
 var webFiles embed.FS
 
 var safeFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+var storedMediaName = regexp.MustCompile(`^[0-9]{8}_[0-9]{6}\.[0-9]{3}_[a-zA-Z0-9._-]+_[a-f0-9]{16}\.(jpg|png|gif|webp|heic|heif|avif|mp4|mov|m4v|3gp|ogv|avi|webm|mkv|mpeg)$`)
 
 type Server struct {
 	cfg       Config
-	template  *template.Template
+	templates map[string]*template.Template
 	assets    http.Handler
 	limiter   *rateLimiter
 	writeGate chan struct{}
@@ -53,6 +55,22 @@ type uploadMetadata struct {
 	Size         int64  `json:"size"`
 	RemoteIP     string `json:"remote_ip"`
 	UploadedAt   string `json:"uploaded_at"`
+	IsChallenge  bool   `json:"is_challenge,omitempty"`
+	Challenge    string `json:"challenge,omitempty"`
+	ChallengeBy  string `json:"challenge_by,omitempty"`
+}
+
+type publicMedia struct {
+	ID          string `json:"id"`
+	URL         string `json:"url"`
+	Kind        string `json:"kind"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	GuestName   string `json:"guest_name,omitempty"`
+	UploadedAt  string `json:"uploaded_at"`
+	IsChallenge bool   `json:"is_challenge,omitempty"`
+	Challenge   string `json:"challenge,omitempty"`
+	ChallengeBy string `json:"challenge_by,omitempty"`
 }
 
 func New(cfg Config) (http.Handler, error) {
@@ -63,13 +81,17 @@ func New(cfg Config) (http.Handler, error) {
 		return nil, err
 	}
 
-	tmplBytes, err := webFiles.ReadFile("web/index.html")
-	if err != nil {
-		return nil, err
-	}
-	tmpl, err := template.New("index").Parse(string(tmplBytes))
-	if err != nil {
-		return nil, err
+	templates := make(map[string]*template.Template, 3)
+	for _, name := range []string{"index", "gallery", "slideshow"} {
+		tmplBytes, err := webFiles.ReadFile("web/" + name + ".html")
+		if err != nil {
+			return nil, err
+		}
+		tmpl, err := template.New(name).Parse(string(tmplBytes))
+		if err != nil {
+			return nil, err
+		}
+		templates[name] = tmpl
 	}
 	assetFS, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -78,7 +100,7 @@ func New(cfg Config) (http.Handler, error) {
 
 	s := &Server{
 		cfg:       cfg,
-		template:  tmpl,
+		templates: templates,
 		assets:    http.FileServer(http.FS(assetFS)),
 		limiter:   newRateLimiter(cfg.MaxUploadsPerHour, time.Hour),
 		writeGate: make(chan struct{}, 4),
@@ -97,7 +119,11 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/assets")
 		s.assets.ServeHTTP(w, r)
 	case strings.HasPrefix(r.URL.Path, "/u/") && r.Method == http.MethodGet:
-		s.serveUploadPage(w, r)
+		s.serveProtectedPage(w, r)
+	case strings.HasPrefix(r.URL.Path, "/m/") && r.Method == http.MethodGet:
+		s.serveMedia(w, r)
+	case r.URL.Path == "/api/media" && r.Method == http.MethodGet:
+		s.handleMediaList(w, r)
 	case r.URL.Path == "/api/upload" && r.Method == http.MethodPost:
 		s.handleUpload(w, r)
 	default:
@@ -105,15 +131,30 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) serveUploadPage(w http.ResponseWriter, r *http.Request) {
-	token, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/u/"))
+func (s *Server) serveProtectedPage(w http.ResponseWriter, r *http.Request) {
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/u/"), "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) == 0 || len(parts) > 2 {
+		http.NotFound(w, r)
+		return
+	}
+	token, err := url.PathUnescape(parts[0])
 	if err != nil || !s.validToken(token) {
+		http.NotFound(w, r)
+		return
+	}
+	page := "index"
+	if len(parts) == 2 {
+		page = parts[1]
+	}
+	tmpl, ok := s.templates[page]
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := s.template.Execute(w, pageData{
+	if err := tmpl.Execute(w, pageData{
 		Title:       s.cfg.EventTitle,
 		Subtitle:    s.cfg.EventSubtitle,
 		UploadToken: s.cfg.UploadToken,
@@ -154,6 +195,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var guestName string
+	var challengeFlag string
+	var challengeText string
+	var challengeBy string
 	var metadata uploadMetadata
 	stored := false
 	for {
@@ -167,10 +211,19 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch part.FormName() {
-		case "guest_name":
+		case "guest_name", "is_challenge", "challenge", "challenge_by":
 			value, readErr := io.ReadAll(io.LimitReader(part, 4<<10))
 			if readErr == nil {
-				guestName = cleanGuestName(string(value))
+				switch part.FormName() {
+				case "guest_name":
+					guestName = cleanText(string(value), 80)
+				case "is_challenge":
+					challengeFlag = strings.TrimSpace(string(value))
+				case "challenge":
+					challengeText = cleanText(string(value), 180)
+				case "challenge_by":
+					challengeBy = cleanText(string(value), 120)
+				}
 			}
 		case "media", "photo":
 			if stored || part.FileName() == "" {
@@ -199,6 +252,21 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadata.GuestName = guestName
+	metadata.IsChallenge = strings.EqualFold(challengeFlag, "true") || challengeFlag == "1"
+	if metadata.IsChallenge {
+		if !strings.HasPrefix(metadata.ContentType, "image/") {
+			s.removeStoredUpload(metadata.StoredName)
+			writeJSONError(w, http.StatusBadRequest, "Ein Challenge-Bild muss ein Foto sein.")
+			return
+		}
+		if challengeText == "" || challengeBy == "" {
+			s.removeStoredUpload(metadata.StoredName)
+			writeJSONError(w, http.StatusBadRequest, "Bitte Challenge und Teilnehmer vollständig angeben.")
+			return
+		}
+		metadata.Challenge = challengeText
+		metadata.ChallengeBy = challengeBy
+	}
 	if err := s.appendMetadata(metadata); err != nil {
 		log.Printf("append metadata for %s: %v", metadata.StoredName, err)
 	}
@@ -206,6 +274,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": metadata.StoredName})
+}
+
+func (s *Server) removeStoredUpload(name string) {
+	if err := os.Remove(filepath.Join(s.cfg.UploadDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("remove rejected challenge upload %s: %v", name, err)
+	}
 }
 
 type clientUploadError struct {
@@ -290,6 +364,100 @@ func (s *Server) appendMetadata(metadata uploadMetadata) error {
 	}
 	defer file.Close()
 	return json.NewEncoder(file).Encode(metadata)
+}
+
+func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("X-Upload-Token")
+	if !s.validToken(token) {
+		writeJSONError(w, http.StatusNotFound, "Galerie-Link ungültig.")
+		return
+	}
+
+	metadata, err := s.readMetadata()
+	if err != nil {
+		log.Printf("read gallery metadata: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Galerie konnte nicht geladen werden.")
+		return
+	}
+	items := make([]publicMedia, 0, len(metadata))
+	for _, item := range metadata {
+		if !storedMediaName.MatchString(item.StoredName) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(s.cfg.UploadDir, item.StoredName)); err != nil {
+			continue
+		}
+		kind := "video"
+		if strings.HasPrefix(item.ContentType, "image/") {
+			kind = "image"
+		}
+		items = append(items, publicMedia{
+			ID:          item.StoredName,
+			URL:         "/m/" + url.PathEscape(token) + "/" + url.PathEscape(item.StoredName),
+			Kind:        kind,
+			ContentType: item.ContentType,
+			Size:        item.Size,
+			GuestName:   item.GuestName,
+			UploadedAt:  item.UploadedAt,
+			IsChallenge: item.IsChallenge,
+			Challenge:   item.Challenge,
+			ChallengeBy: item.ChallengeBy,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UploadedAt > items[j].UploadedAt })
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+}
+
+func (s *Server) readMetadata() ([]uploadMetadata, error) {
+	s.metaMu.Lock()
+	defer s.metaMu.Unlock()
+
+	file, err := os.Open(filepath.Join(s.cfg.UploadDir, "uploads.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return []uploadMetadata{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	items := make([]uploadMetadata, 0)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for scanner.Scan() {
+		var item uploadMetadata
+		if err := json.Unmarshal(scanner.Bytes(), &item); err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, scanner.Err()
+}
+
+func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/m/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 {
+		http.NotFound(w, r)
+		return
+	}
+	token, tokenErr := url.PathUnescape(parts[0])
+	name, nameErr := url.PathUnescape(parts[1])
+	if tokenErr != nil || nameErr != nil || !s.validToken(token) || !storedMediaName.MatchString(name) {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(s.cfg.UploadDir, name)
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("Content-Disposition", "inline")
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) validToken(candidate string) bool {
@@ -397,11 +565,11 @@ func clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func cleanGuestName(value string) string {
+func cleanText(value string, limit int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
-	if len(runes) > 80 {
-		value = string(runes[:80])
+	if len(runes) > limit {
+		value = string(runes[:limit])
 	}
 	return value
 }
@@ -426,7 +594,7 @@ func verifyWritable(dir string) error {
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("Permissions-Policy", "camera=(self), geolocation=(), microphone=()")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

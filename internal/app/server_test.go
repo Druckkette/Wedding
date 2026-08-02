@@ -44,6 +44,9 @@ func TestUploadPageRequiresToken(t *testing.T) {
 		{"/", http.StatusNotFound},
 		{"/u/wrong", http.StatusNotFound},
 		{"/u/" + testToken, http.StatusOK},
+		{"/u/" + testToken + "/gallery", http.StatusOK},
+		{"/u/" + testToken + "/slideshow", http.StatusOK},
+		{"/u/" + testToken + "/unknown", http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(http.MethodGet, test.path, nil)
 		res := httptest.NewRecorder()
@@ -173,12 +176,120 @@ func TestMP4VideoUploadIsStoredWithoutModification(t *testing.T) {
 	t.Fatal("stored video not found")
 }
 
+func TestChallengeAppearsInGalleryAndMediaIsProtected(t *testing.T) {
+	cfg := testConfig(t)
+	handler, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jpeg := append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, bytes.Repeat([]byte{0x51}, 700)...)
+	request := uploadRequestWithFields(t, "challenge.jpeg", jpeg, testToken, map[string]string{
+		"is_challenge": "true",
+		"challenge":    "Tanzt mit dem Brautpaar",
+		"challenge_by": "Mia & Tom",
+	})
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, request)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("upload: got %d: %s", res.Code, res.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/media", nil)
+	listReq.Header.Set("X-Upload-Token", testToken)
+	listRes := httptest.NewRecorder()
+	handler.ServeHTTP(listRes, listReq)
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("gallery: got %d: %s", listRes.Code, listRes.Body.String())
+	}
+	responseBody := listRes.Body.Bytes()
+	var payload struct {
+		Items []publicMedia `json:"items"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(responseBody)).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("got %d gallery items", len(payload.Items))
+	}
+	item := payload.Items[0]
+	if !item.IsChallenge || item.Challenge != "Tanzt mit dem Brautpaar" || item.ChallengeBy != "Mia & Tom" {
+		t.Fatalf("unexpected challenge: %+v", item)
+	}
+	if strings.Contains(string(responseBody), "remote_ip") || strings.Contains(string(responseBody), "original_name") {
+		t.Fatal("private upload metadata leaked through gallery API")
+	}
+
+	mediaReq := httptest.NewRequest(http.MethodGet, item.URL, nil)
+	mediaRes := httptest.NewRecorder()
+	handler.ServeHTTP(mediaRes, mediaReq)
+	if mediaRes.Code != http.StatusOK || !bytes.Equal(mediaRes.Body.Bytes(), jpeg) {
+		t.Fatalf("protected media: got %d with %d bytes", mediaRes.Code, mediaRes.Body.Len())
+	}
+	wrongMediaReq := httptest.NewRequest(http.MethodGet, strings.Replace(item.URL, testToken, "wrong", 1), nil)
+	wrongMediaRes := httptest.NewRecorder()
+	handler.ServeHTTP(wrongMediaRes, wrongMediaReq)
+	if wrongMediaRes.Code != http.StatusNotFound {
+		t.Fatalf("wrong media token: got %d", wrongMediaRes.Code)
+	}
+}
+
+func TestChallengeRejectsVideoAndIncompleteDetails(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		filename string
+		content  []byte
+		fields   map[string]string
+	}{
+		{
+			name:     "video",
+			filename: "challenge.mp4",
+			content:  append(append([]byte{0, 0, 0, 24}, []byte("ftypmp420000mp42isom")...), bytes.Repeat([]byte{0x7a}, 128)...),
+			fields:   map[string]string{"is_challenge": "true", "challenge": "Tanzen", "challenge_by": "Mia"},
+		},
+		{
+			name:     "missing participants",
+			filename: "challenge.jpg",
+			content:  append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, bytes.Repeat([]byte{0x51}, 128)...),
+			fields:   map[string]string{"is_challenge": "true", "challenge": "Tanzen"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := testConfig(t)
+			handler, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := httptest.NewRecorder()
+			handler.ServeHTTP(res, uploadRequestWithFields(t, test.filename, test.content, testToken, test.fields))
+			if res.Code != http.StatusBadRequest {
+				t.Fatalf("got %d: %s", res.Code, res.Body.String())
+			}
+			files, err := os.ReadDir(cfg.UploadDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 0 {
+				t.Fatalf("rejected challenge left %d file(s)", len(files))
+			}
+		})
+	}
+}
+
 func uploadRequest(t *testing.T, filename string, content []byte, token string) *http.Request {
+	return uploadRequestWithFields(t, filename, content, token, nil)
+}
+
+func uploadRequestWithFields(t *testing.T, filename string, content []byte, token string, fields map[string]string) *http.Request {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("guest_name", "  Anna   & Ben  "); err != nil {
 		t.Fatal(err)
+	}
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatal(err)
+		}
 	}
 	part, err := writer.CreateFormFile("photo", filename)
 	if err != nil {

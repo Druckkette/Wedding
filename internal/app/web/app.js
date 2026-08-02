@@ -7,6 +7,11 @@
   const fileList = document.querySelector('#file-list');
   const countLabel = document.querySelector('#selection-count');
   const clearButton = document.querySelector('#clear-button');
+  const challengeToggle = document.querySelector('#challenge-toggle');
+  const challengePanel = document.querySelector('#challenge-panel');
+  const challengeText = document.querySelector('#challenge-text');
+  const challengeBy = document.querySelector('#challenge-by');
+  const challengeError = document.querySelector('#challenge-error');
   const uploadButton = document.querySelector('#upload-button');
   const uploadButtonLabel = document.querySelector('#upload-button-label');
   const guestName = document.querySelector('#guest-name');
@@ -86,6 +91,7 @@
 
     uploadButton.disabled = uploading || !entries.some((entry) => entry.state !== 'done');
     clearButton.disabled = uploading;
+    challengeToggle.disabled = uploading;
   }
 
   function statusText(entry) {
@@ -110,13 +116,39 @@
     selection.hidden = true;
     result.hidden = true;
     dropZone.hidden = false;
+    challengeToggle.checked = false;
+    challengePanel.hidden = true;
+    challengeText.value = '';
+    challengeBy.value = '';
+    challengeError.hidden = true;
     render();
+  }
+
+  function validateChallenge() {
+    challengeError.hidden = true;
+    if (!challengeToggle.checked) return true;
+    if (entries.length !== 1 || entries[0].isVideo) {
+      challengeError.textContent = 'Bitte genau ein Foto auswählen. Videos und Mehrfachauswahl sind für Challenges nicht möglich.';
+      challengeError.hidden = false;
+      return false;
+    }
+    if (!challengeText.value.trim() || !challengeBy.value.trim()) {
+      challengeError.textContent = 'Bitte Challenge und Teilnehmer vollständig eintragen.';
+      challengeError.hidden = false;
+      return false;
+    }
+    return true;
   }
 
   function uploadFile(entry) {
     return new Promise((resolve) => {
       const form = new FormData();
       form.append('guest_name', guestName.value.trim());
+      form.append('is_challenge', challengeToggle.checked ? 'true' : 'false');
+      if (challengeToggle.checked) {
+        form.append('challenge', challengeText.value.trim());
+        form.append('challenge_by', challengeBy.value.trim());
+      }
       form.append('media', entry.file, entry.file.name);
       const request = new XMLHttpRequest();
       request.open('POST', '/api/upload');
@@ -157,6 +189,8 @@
 
   async function uploadAll() {
     if (uploading) return;
+    if (!validateChallenge()) return;
+    const challengeUpload = challengeToggle.checked;
     uploading = true;
     const pending = entries.filter((entry) => entry.state !== 'done');
     let completed = 0;
@@ -177,7 +211,9 @@
     if (failures.length === 0 && completed > 0) {
       selection.hidden = true;
       result.hidden = false;
-      resultMessage.textContent = `${completed} ${completed === 1 ? 'Datei wurde' : 'Dateien wurden'} sicher gespeichert.`;
+      resultMessage.textContent = challengeUpload
+        ? 'Euer Challenge-Bild wurde gespeichert und erscheint gleich auf dem Beamer.'
+        : `${completed} ${completed === 1 ? 'Datei wurde' : 'Dateien wurden'} sicher gespeichert.`;
       result.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
       uploadButtonLabel.textContent = failures.length ? 'Fehlgeschlagene erneut senden' : 'Dateien hochladen';
@@ -186,6 +222,11 @@
   }
 
   input.addEventListener('change', () => addFiles(input.files));
+  challengeToggle.addEventListener('change', () => {
+    challengePanel.hidden = !challengeToggle.checked;
+    challengeError.hidden = true;
+    if (challengeToggle.checked) challengeText.focus();
+  });
   clearButton.addEventListener('click', reset);
   uploadButton.addEventListener('click', uploadAll);
   moreButton.addEventListener('click', reset);

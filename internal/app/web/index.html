@@ -19,6 +19,11 @@
       <h1 id="page-title">{{.Title}}</h1>
       <p class="subtitle">{{.Subtitle}}</p>
       <div class="heart" aria-hidden="true">♥</div>
+      <nav class="page-nav" aria-label="Hochzeitsfotos">
+        <a class="active" href="/u/{{.UploadToken}}">Hochladen</a>
+        <a href="/u/{{.UploadToken}}/gallery">Galerie</a>
+        <a href="/u/{{.UploadToken}}/slideshow">Diashow</a>
+      </nav>
       <div class="botanical botanical-right" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </div>
@@ -51,6 +56,25 @@
           <strong id="selection-count"></strong>
           <button class="text-button" id="clear-button" type="button">Auswahl löschen</button>
         </div>
+        <label class="challenge-toggle" for="challenge-toggle">
+          <input id="challenge-toggle" type="checkbox">
+          <span>
+            <strong>Das ist ein Challenge-Bild</strong>
+            <small>Für eine erledigte Foto-Challenge am Tisch</small>
+          </span>
+        </label>
+        <div class="challenge-panel" id="challenge-panel" hidden>
+          <p>Challenge-Bilder werden einzeln hochgeladen und auf dem Beamer besonders gefeiert.</p>
+          <label for="challenge-text">
+            <span>Welche Challenge wurde geschafft?</span>
+            <input id="challenge-text" type="text" maxlength="180" placeholder="z. B. Macht ein Foto mit dem Brautpaar">
+          </label>
+          <label for="challenge-by">
+            <span>Wer hat sie gemacht?</span>
+            <input id="challenge-by" type="text" maxlength="120" placeholder="z. B. Anna &amp; Felix">
+          </label>
+          <p class="form-error" id="challenge-error" role="alert" hidden></p>
+        </div>
         <ul id="file-list" class="file-list" aria-live="polite"></ul>
         <button class="upload-button" id="upload-button" type="button">
           <span id="upload-button-label">Dateien hochladen</span>
@@ -63,12 +87,13 @@
         <h2>Vielen Dank!</h2>
         <p id="result-message"></p>
         <button class="secondary-button" id="more-button" type="button">Weitere Dateien auswählen</button>
+        <a class="result-link" href="/u/{{.UploadToken}}/gallery">Zur Galerie</a>
       </div>
     </section>
 
     <footer>
       <span class="lock" aria-hidden="true">⌁</span>
-      <p>Nur das Brautpaar kann die hochgeladenen Fotos und Videos sehen.</p>
+      <p>Nur Personen mit diesem privaten Hochzeits-Link können die Galerie sehen.</p>
     </footer>
   </main>
   <script src="/assets/app.js" defer></script>

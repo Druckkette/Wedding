@@ -6,8 +6,7 @@
   <meta name="theme-color" content="#f7f2ea">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <meta name="upload-token" content="{{.UploadToken}}">
-  <meta name="max-upload-mb" content="{{.MaxUploadMB}}">
-  <title>{{.Title}} – Fotos teilen</title>
+  <title>{{.Title}} – Fotos und Videos teilen</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
@@ -28,8 +27,8 @@
     <section class="upload-card" aria-labelledby="upload-heading">
       <div class="step-mark" aria-hidden="true">01</div>
       <div class="card-heading">
-        <h2 id="upload-heading">Eure Fotos</h2>
-        <p>Wählt mehrere Bilder auf einmal aus. Die Originale werden direkt und sicher auf unserem privaten Speicher abgelegt.</p>
+        <h2 id="upload-heading">Eure Fotos &amp; Videos</h2>
+        <p>Wählt mehrere Aufnahmen auf einmal aus. Die Originale werden ohne Größenlimit direkt und sicher auf unserem privaten Speicher abgelegt.</p>
       </div>
 
       <label class="name-field" for="guest-name">
@@ -37,14 +36,14 @@
         <input id="guest-name" name="guest-name" type="text" maxlength="80" autocomplete="name" placeholder="z. B. Anna &amp; Felix">
       </label>
 
-      <input id="photo-input" class="visually-hidden" type="file" accept="image/*,.heic,.heif,.avif" multiple>
+      <input id="photo-input" class="visually-hidden" type="file" accept="image/*,video/*,.heic,.heif,.avif,.mkv" multiple>
       <label class="drop-zone" for="photo-input" id="drop-zone">
         <span class="camera-icon" aria-hidden="true">
           <svg viewBox="0 0 48 48" role="img"><path d="M17 13.5 20 9h8l3 4.5h6.5A4.5 4.5 0 0 1 42 18v17.5a4.5 4.5 0 0 1-4.5 4.5h-27A4.5 4.5 0 0 1 6 35.5V18a4.5 4.5 0 0 1 4.5-4.5H17Zm7 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-3.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z"/></svg>
         </span>
-        <strong>Fotos auswählen</strong>
+        <strong>Fotos &amp; Videos auswählen</strong>
         <span>aus der Mediathek oder direkt aufnehmen</span>
-        <em>JPEG, PNG, HEIC, WebP oder AVIF · bis {{.MaxUploadMB}} MB</em>
+        <em>Originalqualität · ohne Größenlimit</em>
       </label>
 
       <div id="selection" class="selection" hidden>
@@ -54,7 +53,7 @@
         </div>
         <ul id="file-list" class="file-list" aria-live="polite"></ul>
         <button class="upload-button" id="upload-button" type="button">
-          <span id="upload-button-label">Fotos hochladen</span>
+          <span id="upload-button-label">Dateien hochladen</span>
           <span class="button-arrow" aria-hidden="true">→</span>
         </button>
       </div>
@@ -63,13 +62,13 @@
         <div class="result-icon" aria-hidden="true">✓</div>
         <h2>Vielen Dank!</h2>
         <p id="result-message"></p>
-        <button class="secondary-button" id="more-button" type="button">Weitere Fotos auswählen</button>
+        <button class="secondary-button" id="more-button" type="button">Weitere Dateien auswählen</button>
       </div>
     </section>
 
     <footer>
       <span class="lock" aria-hidden="true">⌁</span>
-      <p>Nur das Brautpaar kann die hochgeladenen Bilder sehen.</p>
+      <p>Nur das Brautpaar kann die hochgeladenen Fotos und Videos sehen.</p>
     </footer>
   </main>
   <script src="/assets/app.js" defer></script>

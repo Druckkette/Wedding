@@ -14,7 +14,6 @@
   const resultMessage = document.querySelector('#result-message');
   const moreButton = document.querySelector('#more-button');
   const token = document.querySelector('meta[name="upload-token"]').content;
-  const maxBytes = Number(document.querySelector('meta[name="max-upload-mb"]').content) * 1024 * 1024;
   let entries = [];
   let uploading = false;
 
@@ -28,9 +27,12 @@
     if (uploading) return;
     const known = new Set(entries.map((entry) => keyFor(entry.file)));
     Array.from(fileCollection).forEach((file) => {
-      if (!file.type.startsWith('image/') && !/\.(heic|heif|avif)$/i.test(file.name)) return;
+      const supportedByType = file.type.startsWith('image/') || file.type.startsWith('video/');
+      const supportedByName = /\.(heic|heif|avif|mp4|mov|m4v|webm|mkv|avi|mpeg|mpg|3gp|3gpp|ogv)$/i.test(file.name);
+      if (!supportedByType && !supportedByName) return;
       if (known.has(keyFor(file))) return;
-      entries.push({ file, url: URL.createObjectURL(file), state: file.size > maxBytes ? 'oversize' : 'ready', progress: 0 });
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|mpeg|mpg|3gp|3gpp|ogv)$/i.test(file.name);
+      entries.push({ file, url: URL.createObjectURL(file), isVideo, state: 'ready', progress: 0 });
       known.add(keyFor(file));
     });
     render();
@@ -39,23 +41,29 @@
   function render() {
     selection.hidden = entries.length === 0;
     dropZone.hidden = entries.length > 0;
-    countLabel.textContent = `${entries.length} ${entries.length === 1 ? 'Foto ausgewählt' : 'Fotos ausgewählt'}`;
+    countLabel.textContent = `${entries.length} ${entries.length === 1 ? 'Datei ausgewählt' : 'Dateien ausgewählt'}`;
     fileList.replaceChildren();
 
     entries.forEach((entry, index) => {
       const li = document.createElement('li');
       li.className = 'file-item';
-      const img = document.createElement('img');
-      img.className = 'file-thumb';
-      img.src = entry.url;
-      img.alt = '';
+      const preview = document.createElement(entry.isVideo ? 'video' : 'img');
+      preview.className = 'file-thumb';
+      preview.src = entry.url;
+      if (entry.isVideo) {
+        preview.muted = true;
+        preview.playsInline = true;
+        preview.preload = 'metadata';
+      } else {
+        preview.alt = '';
+      }
       const info = document.createElement('div');
       info.className = 'file-info';
       const name = document.createElement('span');
       name.className = 'file-name';
       name.textContent = entry.file.name;
       const status = document.createElement('span');
-      status.className = `file-status ${entry.state === 'failed' || entry.state === 'oversize' ? 'error' : entry.state === 'done' ? 'done' : ''}`;
+      status.className = `file-status ${entry.state === 'failed' ? 'error' : entry.state === 'done' ? 'done' : ''}`;
       status.textContent = statusText(entry);
       const track = document.createElement('div');
       track.className = 'progress-track';
@@ -72,16 +80,15 @@
       remove.textContent = '×';
       remove.disabled = uploading;
       remove.addEventListener('click', () => removeEntry(index));
-      li.append(img, info, remove);
+      li.append(preview, info, remove);
       fileList.append(li);
     });
 
-    uploadButton.disabled = uploading || !entries.some((entry) => entry.state !== 'oversize' && entry.state !== 'done');
+    uploadButton.disabled = uploading || !entries.some((entry) => entry.state !== 'done');
     clearButton.disabled = uploading;
   }
 
   function statusText(entry) {
-    if (entry.state === 'oversize') return `Zu groß · maximal ${Math.round(maxBytes / 1024 / 1024)} MB`;
     if (entry.state === 'uploading') return `${entry.progress}% · wird hochgeladen`;
     if (entry.state === 'done') return 'Sicher gespeichert';
     if (entry.state === 'failed') return entry.error || 'Upload fehlgeschlagen';
@@ -99,7 +106,7 @@
     entries = [];
     input.value = '';
     uploading = false;
-    uploadButtonLabel.textContent = 'Fotos hochladen';
+    uploadButtonLabel.textContent = 'Dateien hochladen';
     selection.hidden = true;
     result.hidden = true;
     dropZone.hidden = false;
@@ -109,12 +116,11 @@
   function uploadFile(entry) {
     return new Promise((resolve) => {
       const form = new FormData();
-      form.append('photo', entry.file, entry.file.name);
       form.append('guest_name', guestName.value.trim());
+      form.append('media', entry.file, entry.file.name);
       const request = new XMLHttpRequest();
       request.open('POST', '/api/upload');
       request.setRequestHeader('X-Upload-Token', token);
-      request.timeout = 15 * 60 * 1000;
       request.upload.addEventListener('progress', (event) => {
         if (!event.lengthComputable) return;
         entry.progress = Math.min(99, Math.round(event.loaded / event.total * 100));
@@ -152,7 +158,7 @@
   async function uploadAll() {
     if (uploading) return;
     uploading = true;
-    const pending = entries.filter((entry) => entry.state !== 'oversize' && entry.state !== 'done');
+    const pending = entries.filter((entry) => entry.state !== 'done');
     let completed = 0;
     uploadButtonLabel.textContent = `0 von ${pending.length} hochgeladen`;
     render();
@@ -171,10 +177,10 @@
     if (failures.length === 0 && completed > 0) {
       selection.hidden = true;
       result.hidden = false;
-      resultMessage.textContent = `${completed} ${completed === 1 ? 'Foto wurde' : 'Fotos wurden'} sicher gespeichert.`;
+      resultMessage.textContent = `${completed} ${completed === 1 ? 'Datei wurde' : 'Dateien wurden'} sicher gespeichert.`;
       result.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
-      uploadButtonLabel.textContent = failures.length ? 'Fehlgeschlagene erneut senden' : 'Fotos hochladen';
+      uploadButtonLabel.textContent = failures.length ? 'Fehlgeschlagene erneut senden' : 'Dateien hochladen';
       render();
     }
   }

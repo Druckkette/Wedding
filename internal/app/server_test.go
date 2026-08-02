@@ -23,7 +23,6 @@ func testConfig(t *testing.T) Config {
 		UploadToken:       testToken,
 		EventTitle:        "Test Hochzeit",
 		EventSubtitle:     "Test subtitle",
-		MaxUploadBytes:    1 << 20,
 		MaxUploadsPerHour: 10,
 		ReadHeaderTimeout: time.Second,
 		ReadTimeout:       time.Minute,
@@ -130,24 +129,62 @@ func TestUploadRejectsWrongTokenAndNonImage(t *testing.T) {
 
 func TestHEICDetection(t *testing.T) {
 	header := append([]byte{0, 0, 0, 24}, []byte("ftypheic0000mif1")...)
-	mime, ext, ok := detectImage(header, "IMG_1000.HEIC")
+	mime, ext, ok := detectMedia(header, "IMG_1000.HEIC")
 	if !ok || mime != "image/heic" || ext != ".heic" {
 		t.Fatalf("got %q %q %t", mime, ext, ok)
 	}
+}
+
+func TestMP4VideoUploadIsStoredWithoutModification(t *testing.T) {
+	cfg := testConfig(t)
+	handler, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp4 := append([]byte{0, 0, 0, 24}, []byte("ftypmp420000mp42isom")...)
+	mp4 = append(mp4, bytes.Repeat([]byte{0x7a}, 2048)...)
+
+	request := uploadRequest(t, "Hochzeitstanz.mp4", mp4, testToken)
+	request.Header.Set("Origin", "https://example.test")
+	request.Host = "example.test"
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, request)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("got %d: %s", res.Code, res.Body.String())
+	}
+
+	files, err := os.ReadDir(cfg.UploadDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".mp4") {
+			continue
+		}
+		stored, err := os.ReadFile(filepath.Join(cfg.UploadDir, file.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(stored, mp4) {
+			t.Fatal("stored video bytes differ from upload")
+		}
+		return
+	}
+	t.Fatal("stored video not found")
 }
 
 func uploadRequest(t *testing.T, filename string, content []byte, token string) *http.Request {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("guest_name", "  Anna   & Ben  "); err != nil {
+		t.Fatal(err)
+	}
 	part, err := writer.CreateFormFile("photo", filename)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := part.Write(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.WriteField("guest_name", "  Anna   & Ben  "); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {

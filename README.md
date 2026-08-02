@@ -1,17 +1,19 @@
-# Hochzeitsfotos direkt aufs NAS
+# Hochzeitsfotos und -videos direkt aufs NAS
 
-Eine kleine, für iOS und Android optimierte Web-App, über die Hochzeitsgäste ohne separate App mehrere Fotos auswählen und direkt auf ein Synology-NAS laden können.
+Eine kleine, für iOS und Android optimierte Web-App, über die Hochzeitsgäste ohne separate App mehrere Fotos und Videos auswählen und direkt auf ein Synology-NAS laden können.
 
 ## Eigenschaften
 
-- Mehrfachauswahl aus der Fotomediathek und direkter Kamerazugriff
-- JPEG, PNG, GIF, WebP, HEIC/HEIF und AVIF
-- Einzelner Fortschritt pro Bild und gezielter Wiederholungsversuch
+- Mehrfachauswahl aus der Mediathek und direkter Kamerazugriff
+- Fotos: JPEG, PNG, GIF, WebP, HEIC/HEIF und AVIF
+- Videos: MP4, MOV, M4V, WebM/MKV, AVI, MPEG, 3GP und OGV
+- Kein festes Dateigrößen- oder Upload-Zeitlimit; Dateien werden gestreamt
+- Einzelner Fortschritt pro Datei und gezielter Wiederholungsversuch
 - Originaldateien ohne Komprimierung oder Konvertierung
 - Geheimer, QR-Code-tauglicher Upload-Link
 - Keine öffentliche Galerie und keine Download-Route
-- Serverseitige Typprüfung, Größenlimit, Rate-Limit und atomisches Speichern
-- Metadaten als `uploads.jsonl` neben den Bildern
+- Serverseitige Typprüfung, Rate-Limit und atomisches Speichern
+- Metadaten als `uploads.jsonl` neben den Dateien
 - Unprivilegierter, schreibgeschützter Docker-Container
 
 ## Lokal starten
@@ -31,7 +33,6 @@ Danach ist die Seite unter `http://localhost:18787/u/<UPLOAD_TOKEN>` erreichbar.
 | `UPLOAD_TOKEN` | – | Pflichtwert mit mindestens 32 URL-sicheren Zeichen |
 | `EVENT_TITLE` | `Unsere Hochzeit` | Überschrift der Upload-Seite |
 | `EVENT_SUBTITLE` | siehe `.env.example` | Einladungstext |
-| `MAX_UPLOAD_MB` | `75` | Maximale Größe je Bild |
 | `MAX_UPLOADS_PER_HOUR` | `120` | Schutzlimit je IP-Adresse |
 | `HOST_PORT` | `18787` | Nur lokal gebundener Reverse-Proxy-Port |
 | `NAS_UPLOAD_DIR` | `/volume1/photo/Hochzeit-Uploads` | Persistenter Zielordner auf dem NAS |

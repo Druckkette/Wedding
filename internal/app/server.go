@@ -13,7 +13,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -44,7 +43,6 @@ type pageData struct {
 	Title       string
 	Subtitle    string
 	UploadToken string
-	MaxUploadMB int64
 }
 
 type uploadMetadata struct {
@@ -119,7 +117,6 @@ func (s *Server) serveUploadPage(w http.ResponseWriter, r *http.Request) {
 		Title:       s.cfg.EventTitle,
 		Subtitle:    s.cfg.EventSubtitle,
 		UploadToken: s.cfg.UploadToken,
-		MaxUploadMB: s.cfg.MaxUploadBytes >> 20,
 	}); err != nil {
 		log.Printf("render upload page: %v", err)
 	}
@@ -146,41 +143,64 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	case s.writeGate <- struct{}{}:
 		defer func() { <-s.writeGate }()
 	default:
-		writeJSONError(w, http.StatusServiceUnavailable, "Gerade laden viele Gäste Bilder hoch. Bitte gleich erneut versuchen.")
+		writeJSONError(w, http.StatusServiceUnavailable, "Gerade laden viele Gäste Dateien hoch. Bitte gleich erneut versuchen.")
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxUploadBytes+(2<<20))
-	if err := r.ParseMultipartForm(1 << 20); err != nil {
-		status := http.StatusBadRequest
-		message := "Die Datei konnte nicht gelesen werden."
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			status = http.StatusRequestEntityTooLarge
-			message = fmt.Sprintf("Das Bild ist größer als %d MB.", s.cfg.MaxUploadBytes>>20)
+	reader, err := r.MultipartReader()
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Die Anfrage konnte nicht gelesen werden.")
+		return
+	}
+
+	var guestName string
+	var metadata uploadMetadata
+	stored := false
+	for {
+		part, partErr := reader.NextPart()
+		if errors.Is(partErr, io.EOF) {
+			break
 		}
-		writeJSONError(w, status, message)
-		return
-	}
-
-	file, header, err := r.FormFile("photo")
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Kein Bild ausgewählt.")
-		return
-	}
-	defer file.Close()
-
-	guestName := cleanGuestName(r.FormValue("guest_name"))
-	metadata, err := s.storeUpload(file, header, guestName, remoteIP)
-	if err != nil {
-		var uploadErr *clientUploadError
-		if errors.As(err, &uploadErr) {
-			writeJSONError(w, uploadErr.status, uploadErr.message)
+		if partErr != nil {
+			writeJSONError(w, http.StatusBadRequest, "Die Datei konnte nicht gelesen werden.")
 			return
 		}
-		log.Printf("store upload from %s: %v", remoteIP, err)
-		writeJSONError(w, http.StatusInternalServerError, "Speichern fehlgeschlagen. Bitte erneut versuchen.")
+
+		switch part.FormName() {
+		case "guest_name":
+			value, readErr := io.ReadAll(io.LimitReader(part, 4<<10))
+			if readErr == nil {
+				guestName = cleanGuestName(string(value))
+			}
+		case "media", "photo":
+			if stored || part.FileName() == "" {
+				part.Close()
+				continue
+			}
+			metadata, err = s.storeUpload(part, part.FileName(), remoteIP)
+			if err != nil {
+				part.Close()
+				var uploadErr *clientUploadError
+				if errors.As(err, &uploadErr) {
+					writeJSONError(w, uploadErr.status, uploadErr.message)
+					return
+				}
+				log.Printf("store upload from %s: %v", remoteIP, err)
+				writeJSONError(w, http.StatusInternalServerError, "Speichern fehlgeschlagen. Bitte erneut versuchen.")
+				return
+			}
+			stored = true
+		}
+		part.Close()
+	}
+
+	if !stored {
+		writeJSONError(w, http.StatusBadRequest, "Kein Foto oder Video ausgewählt.")
 		return
+	}
+	metadata.GuestName = guestName
+	if err := s.appendMetadata(metadata); err != nil {
+		log.Printf("append metadata for %s: %v", metadata.StoredName, err)
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -195,15 +215,15 @@ type clientUploadError struct {
 
 func (e *clientUploadError) Error() string { return e.message }
 
-func (s *Server) storeUpload(file multipart.File, header *multipart.FileHeader, guestName, remoteIP string) (uploadMetadata, error) {
+func (s *Server) storeUpload(file io.Reader, originalName, remoteIP string) (uploadMetadata, error) {
 	reader := bufio.NewReader(file)
 	peek, err := reader.Peek(512)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return uploadMetadata{}, err
 	}
-	contentType, extension, ok := detectImage(peek, header.Filename)
+	contentType, extension, ok := detectMedia(peek, originalName)
 	if !ok {
-		return uploadMetadata{}, &clientUploadError{http.StatusUnsupportedMediaType, "Dieses Dateiformat wird nicht unterstützt."}
+		return uploadMetadata{}, &clientUploadError{http.StatusUnsupportedMediaType, "Dieses Foto- oder Videoformat wird nicht unterstützt."}
 	}
 
 	now := s.now().UTC()
@@ -211,7 +231,7 @@ func (s *Server) storeUpload(file multipart.File, header *multipart.FileHeader, 
 	if _, err := rand.Read(randomPart); err != nil {
 		return uploadMetadata{}, err
 	}
-	base := strings.TrimSuffix(filepath.Base(header.Filename), filepath.Ext(header.Filename))
+	base := strings.TrimSuffix(filepath.Base(originalName), filepath.Ext(originalName))
 	base = strings.Trim(safeFilename.ReplaceAllString(base, "-"), "-._")
 	if base == "" {
 		base = "foto"
@@ -228,14 +248,10 @@ func (s *Server) storeUpload(file multipart.File, header *multipart.FileHeader, 
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 
-	written, copyErr := io.Copy(temp, io.LimitReader(reader, s.cfg.MaxUploadBytes+1))
+	written, copyErr := io.Copy(temp, reader)
 	if copyErr != nil {
 		temp.Close()
 		return uploadMetadata{}, copyErr
-	}
-	if written > s.cfg.MaxUploadBytes {
-		temp.Close()
-		return uploadMetadata{}, &clientUploadError{http.StatusRequestEntityTooLarge, fmt.Sprintf("Das Bild ist größer als %d MB.", s.cfg.MaxUploadBytes>>20)}
 	}
 	if err := temp.Sync(); err != nil {
 		temp.Close()
@@ -254,15 +270,11 @@ func (s *Server) storeUpload(file multipart.File, header *multipart.FileHeader, 
 
 	metadata := uploadMetadata{
 		StoredName:   storedName,
-		OriginalName: filepath.Base(header.Filename),
-		GuestName:    guestName,
+		OriginalName: filepath.Base(originalName),
 		ContentType:  contentType,
 		Size:         written,
 		RemoteIP:     remoteIP,
 		UploadedAt:   now.Format(time.RFC3339Nano),
-	}
-	if err := s.appendMetadata(metadata); err != nil {
-		log.Printf("append metadata for %s: %v", storedName, err)
 	}
 	return metadata, nil
 }
@@ -287,7 +299,7 @@ func (s *Server) validToken(candidate string) bool {
 	return subtle.ConstantTimeCompare([]byte(candidate), []byte(s.cfg.UploadToken)) == 1
 }
 
-func detectImage(header []byte, originalName string) (string, string, bool) {
+func detectMedia(header []byte, originalName string) (string, string, bool) {
 	detected := http.DetectContentType(header)
 	switch detected {
 	case "image/jpeg":
@@ -309,11 +321,43 @@ func detectImage(header []byte, originalName string) (string, string, bool) {
 		}
 		return "image/heic", ".heic", true
 	}
+	if isISOBaseMedia(header) {
+		ext := strings.ToLower(filepath.Ext(originalName))
+		switch ext {
+		case ".mov":
+			return "video/quicktime", ".mov", true
+		case ".m4v":
+			return "video/x-m4v", ".m4v", true
+		case ".3gp", ".3gpp":
+			return "video/3gpp", ".3gp", true
+		default:
+			return "video/mp4", ".mp4", true
+		}
+	}
+	if len(header) >= 4 && string(header[:4]) == "OggS" {
+		return "video/ogg", ".ogv", true
+	}
+	if len(header) >= 12 && string(header[:4]) == "RIFF" && string(header[8:12]) == "AVI " {
+		return "video/x-msvideo", ".avi", true
+	}
+	if len(header) >= 4 && header[0] == 0x1a && header[1] == 0x45 && header[2] == 0xdf && header[3] == 0xa3 {
+		if strings.EqualFold(filepath.Ext(originalName), ".mkv") || strings.Contains(strings.ToLower(string(header)), "matroska") {
+			return "video/x-matroska", ".mkv", true
+		}
+		return "video/webm", ".webm", true
+	}
+	if len(header) >= 4 && header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x01 && (header[3] == 0xba || header[3] == 0xb3) {
+		return "video/mpeg", ".mpeg", true
+	}
 	return "", "", false
 }
 
+func isISOBaseMedia(header []byte) bool {
+	return len(header) >= 12 && string(header[4:8]) == "ftyp"
+}
+
 func isHEIF(header []byte) bool {
-	if len(header) < 12 || string(header[4:8]) != "ftyp" {
+	if !isISOBaseMedia(header) {
 		return false
 	}
 	brands := []string{"heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1", "avif", "avis"}

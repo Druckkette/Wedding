@@ -23,6 +23,10 @@
   let items = [];
   let initialized = false;
   let regularIndex = 0;
+  let shuffleEnabled = false;
+  let shuffleDeck = [];
+  let itemSignature = '';
+  let lastRegularID = '';
   let paused = false;
   let running = false;
   let advanceSignal = 0;
@@ -118,6 +122,31 @@
     newBadge.hidden = true;
   }
 
+  function shufflePictures(pictures) {
+    const shuffled = [...pictures];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    if (shuffled.length > 1 && shuffled[0].id === lastRegularID) {
+      [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+    }
+    return shuffled;
+  }
+
+  function nextRegularItem() {
+    if (!shuffleEnabled) {
+      const item = items[regularIndex % items.length];
+      regularIndex += 1;
+      lastRegularID = item.id;
+      return item;
+    }
+    if (shuffleDeck.length === 0) shuffleDeck = shufflePictures(items);
+    const item = shuffleDeck.shift();
+    lastRegularID = item.id;
+    return item;
+  }
+
   async function run() {
     if (running) return;
     running = true;
@@ -133,8 +162,7 @@
         item = priority.shift();
         isNew = true;
       } else {
-        item = items[regularIndex % items.length];
-        regularIndex += 1;
+        item = nextRegularItem();
       }
       if (isNew && item.is_challenge) await celebrate(item);
       await show(item, isNew);
@@ -148,6 +176,14 @@
       const payload = await response.json();
       const pictures = payload.items.filter((item) => item.kind === 'image');
       slideshow.classList.toggle('polaroid-mode', payload.slideshow_style === 'polaroid');
+      const nextShuffleEnabled = Boolean(payload.slideshow_shuffle);
+      const nextItemSignature = pictures.map((item) => item.id).join('|');
+      if (nextShuffleEnabled !== shuffleEnabled || nextItemSignature !== itemSignature) {
+        shuffleEnabled = nextShuffleEnabled;
+        itemSignature = nextItemSignature;
+        shuffleDeck = [];
+        regularIndex = 0;
+      }
       const nextDuration = Number(payload.slideshow_interval_seconds) * 1000;
       if (Number.isFinite(nextDuration) && nextDuration !== slideDurationMilliseconds) {
         slideDurationMilliseconds = nextDuration;

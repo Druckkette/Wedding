@@ -66,4 +66,6 @@ Backups sollten mindestens den Ordner aus `NAS_UPLOAD_DIR` umfassen. Dort liegen
 
 Die Beamer-Wechselzeit lässt sich in Settings sekundengenau zwischen 3 und 300 Sekunden einstellen. Bestehende Installationen verwenden automatisch den Standardwert von 10 Sekunden.
 
+Optional mischt der Shuffle-Modus die Bilder für jede Runde neu. Frisch hochgeladene beziehungsweise freigegebene Bilder werden weiterhin zuerst eingeblendet.
+
 Im Vollbild blendet die Diashow Verbindungsstatus, Bildzähler, Steuerleiste und Mauszeiger nach drei Sekunden ohne Mausbewegung aus. Eine Mausbewegung zeigt Zeiger und Bedienelemente wieder kurz an.

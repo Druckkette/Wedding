@@ -31,6 +31,7 @@ type persistedSettings struct {
 	ModerationEnabled        bool              `json:"moderation_enabled"`
 	SlideshowStyle           string            `json:"slideshow_style"`
 	SlideshowIntervalSeconds int               `json:"slideshow_interval_seconds"`
+	SlideshowShuffle         bool              `json:"slideshow_shuffle"`
 	PasswordSalt             string            `json:"password_salt"`
 	PasswordHash             string            `json:"password_hash"`
 	Media                    map[string]string `json:"media"`
@@ -51,6 +52,7 @@ type settingsUpdate struct {
 	ModerationEnabled        *bool  `json:"moderation_enabled"`
 	SlideshowStyle           string `json:"slideshow_style"`
 	SlideshowIntervalSeconds *int   `json:"slideshow_interval_seconds"`
+	SlideshowShuffle         *bool  `json:"slideshow_shuffle"`
 	CurrentPassword          string `json:"current_password"`
 	NewPassword              string `json:"new_password"`
 }
@@ -145,6 +147,9 @@ func (s *settingsStore) update(update settingsUpdate) error {
 			return errors.New("slideshow interval must be between 3 and 300 seconds")
 		}
 		next.SlideshowIntervalSeconds = *update.SlideshowIntervalSeconds
+	}
+	if update.SlideshowShuffle != nil {
+		next.SlideshowShuffle = *update.SlideshowShuffle
 	}
 	if update.NewPassword != "" {
 		if len(update.NewPassword) < 6 || len(update.NewPassword) > 128 {
@@ -417,6 +422,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"moderation_enabled":         state.ModerationEnabled,
 		"slideshow_style":            state.SlideshowStyle,
 		"slideshow_interval_seconds": state.SlideshowIntervalSeconds,
+		"slideshow_shuffle":          state.SlideshowShuffle,
 		"items":                      media,
 	})
 }

@@ -88,6 +88,17 @@
           <p class="settings-error" id="interval-error" role="alert" hidden></p>
           <p class="settings-success" id="interval-success" role="status" hidden></p>
         </form>
+        <div class="shuffle-control">
+          <div class="control-copy">
+            <label for="shuffle-toggle">Bilder mischen</label>
+            <small>Spielt jede Runde in einer neuen zufälligen Reihenfolge ab. Neue Bilder behalten Vorrang.</small>
+          </div>
+          <label class="settings-switch" for="shuffle-toggle">
+            <input id="shuffle-toggle" type="checkbox">
+            <span aria-hidden="true"></span>
+            <strong id="shuffle-label">Aus</strong>
+          </label>
+        </div>
       </section>
 
       <section class="settings-card moderation-card" aria-labelledby="queue-heading">

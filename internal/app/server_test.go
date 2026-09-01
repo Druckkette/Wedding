@@ -334,7 +334,8 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	defaultsRes := httptest.NewRecorder()
 	handler.ServeHTTP(defaultsRes, jsonRequest(t, http.MethodGet, "/api/settings", nil, cookie))
 	var defaultsPayload struct {
-		SlideshowIntervalSeconds int `json:"slideshow_interval_seconds"`
+		SlideshowIntervalSeconds int  `json:"slideshow_interval_seconds"`
+		SlideshowShuffle         bool `json:"slideshow_shuffle"`
 	}
 	if err := json.NewDecoder(defaultsRes.Body).Decode(&defaultsPayload); err != nil {
 		t.Fatal(err)
@@ -342,12 +343,16 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	if defaultsPayload.SlideshowIntervalSeconds != defaultSlideshowIntervalSeconds {
 		t.Fatalf("default slideshow interval: got %d, want %d", defaultsPayload.SlideshowIntervalSeconds, defaultSlideshowIntervalSeconds)
 	}
+	if defaultsPayload.SlideshowShuffle {
+		t.Fatal("shuffle mode should be disabled by default")
+	}
 
 	moderationEnabled := true
 	update := jsonRequest(t, http.MethodPost, "/api/settings", map[string]any{
 		"moderation_enabled":         moderationEnabled,
 		"slideshow_style":            "polaroid",
 		"slideshow_interval_seconds": 7,
+		"slideshow_shuffle":          true,
 	}, cookie)
 	updateRes := httptest.NewRecorder()
 	handler.ServeHTTP(updateRes, update)
@@ -368,11 +373,12 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 		Items                    []publicMedia `json:"items"`
 		SlideshowStyle           string        `json:"slideshow_style"`
 		SlideshowIntervalSeconds int           `json:"slideshow_interval_seconds"`
+		SlideshowShuffle         bool          `json:"slideshow_shuffle"`
 	}
 	if err := json.NewDecoder(publicListRes.Body).Decode(&publicPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(publicPayload.Items) != 0 || publicPayload.SlideshowStyle != "polaroid" || publicPayload.SlideshowIntervalSeconds != 7 {
+	if len(publicPayload.Items) != 0 || publicPayload.SlideshowStyle != "polaroid" || publicPayload.SlideshowIntervalSeconds != 7 || !publicPayload.SlideshowShuffle {
 		t.Fatalf("unexpected public payload: %+v", publicPayload)
 	}
 
@@ -381,11 +387,12 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	var settingsPayload struct {
 		Items                    []adminMedia `json:"items"`
 		SlideshowIntervalSeconds int          `json:"slideshow_interval_seconds"`
+		SlideshowShuffle         bool         `json:"slideshow_shuffle"`
 	}
 	if err := json.NewDecoder(settingsRes.Body).Decode(&settingsPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(settingsPayload.Items) != 1 || settingsPayload.Items[0].Status != "pending" || settingsPayload.SlideshowIntervalSeconds != 7 {
+	if len(settingsPayload.Items) != 1 || settingsPayload.Items[0].Status != "pending" || settingsPayload.SlideshowIntervalSeconds != 7 || !settingsPayload.SlideshowShuffle {
 		t.Fatalf("unexpected moderation queue: %+v", settingsPayload.Items)
 	}
 	invalidIntervalRes := httptest.NewRecorder()

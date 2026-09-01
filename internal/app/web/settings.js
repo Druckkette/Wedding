@@ -15,6 +15,8 @@
   const intervalInput = document.querySelector('#slideshow-interval');
   const intervalError = document.querySelector('#interval-error');
   const intervalSuccess = document.querySelector('#interval-success');
+  const shuffleToggle = document.querySelector('#shuffle-toggle');
+  const shuffleLabel = document.querySelector('#shuffle-label');
   const filters = Array.from(document.querySelectorAll('[data-filter]'));
   const pendingCount = document.querySelector('#pending-count');
   const grid = document.querySelector('#moderation-grid');
@@ -130,6 +132,8 @@
     moderationLabel.textContent = moderationToggle.checked ? 'An' : 'Aus';
     styleInputs.forEach((input) => { input.checked = input.value === state.slideshow_style; });
     intervalInput.value = String(state.slideshow_interval_seconds || 10);
+    shuffleToggle.checked = Boolean(state.slideshow_shuffle);
+    shuffleLabel.textContent = shuffleToggle.checked ? 'An' : 'Aus';
     login.hidden = true;
     dashboard.hidden = false;
     renderItems();
@@ -229,6 +233,12 @@
     if (!saved) return;
     intervalSuccess.textContent = `Die Wechselzeit beträgt jetzt ${seconds} Sekunden.`;
     intervalSuccess.hidden = false;
+  });
+
+  shuffleToggle.addEventListener('change', async () => {
+    shuffleLabel.textContent = shuffleToggle.checked ? 'An' : 'Aus';
+    const saved = await saveSettings({ slideshow_shuffle: shuffleToggle.checked });
+    if (!saved) await loadSettings();
   });
 
   filters.forEach((button) => button.addEventListener('click', () => {

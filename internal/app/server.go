@@ -519,6 +519,7 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 		"items":                      items,
 		"slideshow_style":            settings.SlideshowStyle,
 		"slideshow_interval_seconds": settings.SlideshowIntervalSeconds,
+		"slideshow_shuffle":          settings.SlideshowShuffle,
 	})
 }
 

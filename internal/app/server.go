@@ -528,18 +528,21 @@ func (s *Server) toPublicMedia(item uploadMetadata) publicMedia {
 	if strings.HasPrefix(item.ContentType, "image/") {
 		kind = "image"
 	}
-	return publicMedia{
+	media := publicMedia{
 		ID:          item.StoredName,
 		URL:         "/m/" + url.PathEscape(s.cfg.UploadToken) + "/" + url.PathEscape(item.StoredName),
 		Kind:        kind,
 		ContentType: item.ContentType,
 		Size:        item.Size,
-		GuestName:   item.GuestName,
 		UploadedAt:  item.UploadedAt,
 		IsChallenge: item.IsChallenge,
 		Challenge:   item.Challenge,
 		ChallengeBy: item.ChallengeBy,
 	}
+	if item.IsChallenge {
+		media.GuestName = item.GuestName
+	}
+	return media
 }
 
 func (s *Server) readMetadata() ([]uploadMetadata, error) {

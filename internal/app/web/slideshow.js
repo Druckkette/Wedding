@@ -18,9 +18,12 @@
   const fullscreenButton = document.querySelector('#fullscreen-button');
   const controls = document.querySelector('.slideshow-controls');
   const slideshow = document.querySelector('#slideshow');
+  const featuredUploadDates = new Set(['2026-09-04', '2026-09-05']);
+  const featuredPlaybackWeight = 3;
   const known = new Set();
   const priority = [];
   let items = [];
+  let playbackItems = [];
   let initialized = false;
   let regularIndex = 0;
   let shuffleEnabled = false;
@@ -86,13 +89,11 @@
       const seal = document.createElement('span');
       seal.className = 'challenge-seal';
       seal.textContent = 'GESCHAFFT';
-      card.append(ribbon, seal);
+      const note = document.createElement('span');
+      note.className = 'polaroid-note';
+      note.textContent = `Eingereicht von ${item.guest_name || item.challenge_by}`;
+      card.append(ribbon, seal, note);
     }
-    const note = document.createElement('span');
-    note.className = 'polaroid-note';
-    const submittedBy = item.guest_name || item.challenge_by;
-    note.textContent = submittedBy ? `Eingereicht von ${submittedBy}` : 'Eingereicht von einem Hochzeitsgast';
-    card.append(note);
     return card;
   }
 
@@ -112,9 +113,6 @@
     if (item.is_challenge) {
       caption.textContent = `${item.challenge_by}: ${item.challenge}`;
       caption.hidden = false;
-    } else if (item.guest_name) {
-      caption.textContent = `Von ${item.guest_name}`;
-      caption.hidden = false;
     }
     const position = items.findIndex((candidate) => candidate.id === item.id);
     counter.textContent = position >= 0 ? `${position + 1} / ${items.length}` : `${items.length} Aufnahmen`;
@@ -122,26 +120,39 @@
     newBadge.hidden = true;
   }
 
+  function weightedPictures(pictures) {
+    const weighted = [];
+    pictures.forEach((item) => {
+      const uploadDate = String(item.uploaded_at || '').slice(0, 10);
+      const weight = featuredUploadDates.has(uploadDate) ? featuredPlaybackWeight : 1;
+      for (let count = 0; count < weight; count += 1) weighted.push(item);
+    });
+    return weighted;
+  }
+
   function shufflePictures(pictures) {
-    const shuffled = [...pictures];
-    for (let index = shuffled.length - 1; index > 0; index -= 1) {
-      const swapIndex = Math.floor(Math.random() * (index + 1));
-      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-    }
-    if (shuffled.length > 1 && shuffled[0].id === lastRegularID) {
-      [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+    const remaining = [...pictures];
+    const shuffled = [];
+    let previousID = lastRegularID;
+    while (remaining.length > 0) {
+      let candidates = remaining.map((item, index) => ({ item, index })).filter(({ item }) => item.id !== previousID);
+      if (candidates.length === 0) candidates = remaining.map((item, index) => ({ item, index }));
+      const selected = candidates[Math.floor(Math.random() * candidates.length)];
+      const [item] = remaining.splice(selected.index, 1);
+      shuffled.push(item);
+      previousID = item.id;
     }
     return shuffled;
   }
 
   function nextRegularItem() {
     if (!shuffleEnabled) {
-      const item = items[regularIndex % items.length];
+      const item = playbackItems[regularIndex % playbackItems.length];
       regularIndex += 1;
       lastRegularID = item.id;
       return item;
     }
-    if (shuffleDeck.length === 0) shuffleDeck = shufflePictures(items);
+    if (shuffleDeck.length === 0) shuffleDeck = shufflePictures(playbackItems);
     const item = shuffleDeck.shift();
     lastRegularID = item.id;
     return item;
@@ -177,12 +188,13 @@
       const pictures = payload.items.filter((item) => item.kind === 'image');
       slideshow.classList.toggle('polaroid-mode', payload.slideshow_style === 'polaroid');
       const nextShuffleEnabled = Boolean(payload.slideshow_shuffle);
-      const nextItemSignature = pictures.map((item) => item.id).join('|');
+      const nextItemSignature = pictures.map((item) => `${item.id}:${item.uploaded_at}`).join('|');
       if (nextShuffleEnabled !== shuffleEnabled || nextItemSignature !== itemSignature) {
         shuffleEnabled = nextShuffleEnabled;
         itemSignature = nextItemSignature;
         shuffleDeck = [];
         regularIndex = 0;
+        playbackItems = weightedPictures(pictures);
       }
       const nextDuration = Number(payload.slideshow_interval_seconds) * 1000;
       if (Number.isFinite(nextDuration) && nextDuration !== slideDurationMilliseconds) {

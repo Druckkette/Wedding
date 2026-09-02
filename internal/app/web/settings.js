@@ -85,11 +85,11 @@
     const info = document.createElement('div');
     info.className = 'moderation-info';
     const title = document.createElement('strong');
-    title.textContent = item.is_challenge ? item.challenge : item.guest_name || 'Hochzeitsaufnahme';
+    title.textContent = item.is_challenge ? item.challenge : item.kind === 'video' ? 'Hochzeitsvideo' : 'Hochzeitsfoto';
     const details = document.createElement('p');
     details.textContent = item.is_challenge
       ? `Erledigt von ${item.challenge_by}`
-      : item.guest_name ? `Von ${item.guest_name}` : item.kind === 'video' ? 'Video-Upload' : 'Foto-Upload';
+      : item.kind === 'video' ? 'Video-Upload' : 'Foto-Upload';
     const actions = document.createElement('div');
     actions.className = 'moderation-actions';
 

@@ -110,6 +110,20 @@ func TestJPEGUploadIsStoredWithoutModification(t *testing.T) {
 	if metadata.OriginalName != "Urlaub 2026.jpeg" || metadata.GuestName != "Anna & Ben" {
 		t.Fatalf("unexpected metadata: %+v", metadata)
 	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/media", nil)
+	listReq.Header.Set("X-Upload-Token", testToken)
+	listRes := httptest.NewRecorder()
+	handler.ServeHTTP(listRes, listReq)
+	var publicPayload struct {
+		Items []publicMedia `json:"items"`
+	}
+	if err := json.NewDecoder(listRes.Body).Decode(&publicPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(publicPayload.Items) != 1 || publicPayload.Items[0].GuestName != "" {
+		t.Fatalf("normal upload exposed submitter name: %+v", publicPayload.Items)
+	}
 }
 
 func TestUploadRejectsWrongTokenAndNonImage(t *testing.T) {
@@ -215,7 +229,7 @@ func TestChallengeAppearsInGalleryAndMediaIsProtected(t *testing.T) {
 		t.Fatalf("got %d gallery items", len(payload.Items))
 	}
 	item := payload.Items[0]
-	if !item.IsChallenge || item.Challenge != "Tanzt mit dem Brautpaar" || item.ChallengeBy != "Mia & Tom" {
+	if !item.IsChallenge || item.Challenge != "Tanzt mit dem Brautpaar" || item.ChallengeBy != "Mia & Tom" || item.GuestName != "Anna & Ben" {
 		t.Fatalf("unexpected challenge: %+v", item)
 	}
 	if strings.Contains(string(responseBody), "remote_ip") || strings.Contains(string(responseBody), "original_name") {

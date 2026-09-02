@@ -48,10 +48,6 @@
       const by = document.createElement('span');
       by.textContent = item.challenge_by;
       lightboxCaption.append(title, by);
-    } else if (item.guest_name) {
-      const by = document.createElement('span');
-      by.textContent = `Hochgeladen von ${item.guest_name}`;
-      lightboxCaption.append(by);
     }
     lightbox.hidden = false;
     document.body.style.overflow = 'hidden';

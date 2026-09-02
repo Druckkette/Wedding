@@ -68,4 +68,6 @@ Die Beamer-Wechselzeit lässt sich in Settings sekundengenau zwischen 3 und 300 
 
 Optional mischt der Shuffle-Modus die Bilder für jede Runde neu. Frisch hochgeladene beziehungsweise freigegebene Bilder werden weiterhin zuerst eingeblendet.
 
+Normale Fotos und Videos zeigen öffentlich keinen Namen der einreichenden Person. Nur Challenge-Fotos enthalten weiterhin die zugehörigen Namen. Bilder mit Upload-Datum 04. oder 05.09.2026 werden in der Diashow dreifach gewichtet; ältere Startbilder bleiben mit einfacher Gewichtung im Umlauf.
+
 Im Vollbild blendet die Diashow Verbindungsstatus, Bildzähler, Steuerleiste und Mauszeiger nach drei Sekunden ohne Mausbewegung aus. Eine Mausbewegung zeigt Zeiger und Bedienelemente wieder kurz an.

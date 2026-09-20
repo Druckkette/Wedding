@@ -436,15 +436,20 @@ func (s *Server) handleModerationUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var update moderationUpdate
-	if err := decodeJSON(r, &update); err != nil || !storedMediaName.MatchString(update.ID) {
+	if err := decodeJSON(r, &update); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Ungültige Aufnahme.")
 		return
 	}
-	if info, err := os.Stat(filepath.Join(s.cfg.UploadDir, update.ID)); err != nil || !info.Mode().IsRegular() {
+	relative, err := decodeMediaID(update.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Ungültige Aufnahme.")
+		return
+	}
+	if _, err := s.resolveMediaPath(relative); err != nil {
 		writeJSONError(w, http.StatusNotFound, "Aufnahme wurde nicht gefunden.")
 		return
 	}
-	if err := s.settings.setMediaStatus(update.ID, update.Status); err != nil {
+	if err := s.settings.setMediaStatus(s.storageKey(relative), update.Status); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Moderationsstatus ist ungültig.")
 		return
 	}
@@ -462,11 +467,17 @@ func (s *Server) handleMediaDelete(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ID string `json:"id"`
 	}
-	if err := decodeJSON(r, &request); err != nil || !storedMediaName.MatchString(request.ID) {
+	if err := decodeJSON(r, &request); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Ungültige Aufnahme.")
 		return
 	}
-	if err := s.deleteMedia(request.ID); err != nil {
+	relative, err := decodeMediaID(request.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Ungültige Aufnahme.")
+		return
+	}
+	settingsKey := s.storageKey(relative)
+	if err := s.deleteMedia(relative); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSONError(w, http.StatusNotFound, "Aufnahme wurde nicht gefunden.")
 			return
@@ -475,7 +486,7 @@ func (s *Server) handleMediaDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Aufnahme konnte nicht gelöscht werden.")
 		return
 	}
-	if err := s.settings.removeMedia(request.ID); err != nil {
+	if err := s.settings.removeMedia(settingsKey); err != nil {
 		logSettingsError("remove deleted media from settings", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": request.ID})
@@ -499,21 +510,19 @@ func (s *Server) validSettingsSession(r *http.Request) bool {
 }
 
 func (s *Server) adminMediaList() ([]adminMedia, error) {
-	metadata, err := s.readMetadata()
+	media, err := s.scanMediaWithVisibility("", true)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]adminMedia, 0, len(metadata))
-	for _, item := range metadata {
-		if !storedMediaName.MatchString(item.StoredName) {
-			continue
-		}
-		if info, err := os.Stat(filepath.Join(s.cfg.UploadDir, item.StoredName)); err != nil || !info.Mode().IsRegular() {
+	items := make([]adminMedia, 0, len(media))
+	for _, item := range media {
+		relative, err := decodeMediaID(item.ID)
+		if err != nil {
 			continue
 		}
 		items = append(items, adminMedia{
-			publicMedia: s.toPublicMedia(item),
-			Status:      s.settings.status(item.StoredName),
+			publicMedia: item,
+			Status:      s.settings.status(s.storageKey(relative)),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UploadedAt > items[j].UploadedAt })

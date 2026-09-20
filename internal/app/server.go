@@ -2,7 +2,7 @@ package app
 
 import (
 	"bufio"
-	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
@@ -18,7 +18,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -28,9 +27,6 @@ import (
 //go:embed web/*
 var webFiles embed.FS
 
-var safeFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
-var storedMediaName = regexp.MustCompile(`^[0-9]{8}_[0-9]{6}\.[0-9]{3}_[a-zA-Z0-9._-]+_[a-f0-9]{16}\.(jpg|png|gif|webp|heic|heif|avif|mp4|mov|m4v|3gp|ogv|avi|webm|mkv|mpeg)$`)
-
 type Server struct {
 	cfg             Config
 	templates       map[string]*template.Template
@@ -39,6 +35,9 @@ type Server struct {
 	settingsLimiter *rateLimiter
 	writeGate       chan struct{}
 	metaMu          sync.Mutex
+	filenameMu      sync.Mutex
+	imageMetaMu     sync.Mutex
+	imageMetaCache  map[string]cachedImageMetadata
 	settings        *settingsStore
 	sessions        *sessionStore
 	now             func() time.Time
@@ -58,22 +57,32 @@ type uploadMetadata struct {
 	Size         int64  `json:"size"`
 	RemoteIP     string `json:"remote_ip"`
 	UploadedAt   string `json:"uploaded_at"`
+	Gallery      string `json:"gallery,omitempty"`
+	SHA256       string `json:"sha256,omitempty"`
 	IsChallenge  bool   `json:"is_challenge,omitempty"`
 	Challenge    string `json:"challenge,omitempty"`
 	ChallengeBy  string `json:"challenge_by,omitempty"`
 }
 
 type publicMedia struct {
-	ID          string `json:"id"`
-	URL         string `json:"url"`
-	Kind        string `json:"kind"`
-	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
-	GuestName   string `json:"guest_name,omitempty"`
-	UploadedAt  string `json:"uploaded_at"`
-	IsChallenge bool   `json:"is_challenge,omitempty"`
-	Challenge   string `json:"challenge,omitempty"`
-	ChallengeBy string `json:"challenge_by,omitempty"`
+	ID          string   `json:"id"`
+	URL         string   `json:"url"`
+	Kind        string   `json:"kind"`
+	ContentType string   `json:"content_type"`
+	Size        int64    `json:"size"`
+	GuestName   string   `json:"guest_name,omitempty"`
+	UploadedAt  string   `json:"uploaded_at"`
+	Gallery     string   `json:"gallery"`
+	Filename    string   `json:"filename"`
+	CapturedAt  string   `json:"captured_at,omitempty"`
+	DownloadURL string   `json:"download_url"`
+	Latitude    *float64 `json:"latitude,omitempty"`
+	Longitude   *float64 `json:"longitude,omitempty"`
+	Width       int      `json:"width,omitempty"`
+	Height      int      `json:"height,omitempty"`
+	IsChallenge bool     `json:"is_challenge,omitempty"`
+	Challenge   string   `json:"challenge,omitempty"`
+	ChallengeBy string   `json:"challenge_by,omitempty"`
 }
 
 func New(cfg Config) (http.Handler, error) {
@@ -113,6 +122,7 @@ func New(cfg Config) (http.Handler, error) {
 		limiter:         newRateLimiter(cfg.MaxUploadsPerHour, time.Hour),
 		settingsLimiter: newRateLimiter(12, 15*time.Minute),
 		writeGate:       make(chan struct{}, 4),
+		imageMetaCache:  make(map[string]cachedImageMetadata),
 		settings:        settings,
 		sessions:        newSessionStore(),
 		now:             time.Now,
@@ -135,6 +145,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveMedia(w, r)
 	case r.URL.Path == "/api/media" && r.Method == http.MethodGet:
 		s.handleMediaList(w, r)
+	case r.URL.Path == "/api/galleries" && r.Method == http.MethodGet:
+		s.handleGalleryList(w, r)
+	case r.URL.Path == "/api/download" && r.Method == http.MethodGet:
+		s.handleOriginalDownload(w, r)
+	case r.URL.Path == "/api/download/zip" && r.Method == http.MethodPost:
+		s.handleZIPDownload(w, r)
 	case r.URL.Path == "/api/upload" && r.Method == http.MethodPost:
 		s.handleUpload(w, r)
 	case r.URL.Path == "/api/settings/login" && r.Method == http.MethodPost:
@@ -216,6 +232,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var guestName string
+	var galleryName string
 	var challengeFlag string
 	var challengeText string
 	var challengeBy string
@@ -232,12 +249,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch part.FormName() {
-		case "guest_name", "is_challenge", "challenge", "challenge_by":
+		case "guest_name", "gallery", "is_challenge", "challenge", "challenge_by":
 			value, readErr := io.ReadAll(io.LimitReader(part, 4<<10))
 			if readErr == nil {
 				switch part.FormName() {
 				case "guest_name":
 					guestName = cleanText(string(value), 80)
+				case "gallery":
+					galleryName = strings.TrimSpace(string(value))
 				case "is_challenge":
 					challengeFlag = strings.TrimSpace(string(value))
 				case "challenge":
@@ -251,7 +270,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 				part.Close()
 				continue
 			}
-			metadata, err = s.storeUpload(part, part.FileName(), remoteIP)
+			metadata, err = s.storeUpload(part, part.FileName(), remoteIP, galleryName)
 			if err != nil {
 				part.Close()
 				var uploadErr *clientUploadError
@@ -305,7 +324,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) removeStoredUpload(name string) {
-	if err := os.Remove(filepath.Join(s.cfg.UploadDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	path, err := s.resolveMediaPath(name)
+	if err != nil {
+		return
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("remove rejected challenge upload %s: %v", name, err)
 	}
 }
@@ -317,7 +340,7 @@ type clientUploadError struct {
 
 func (e *clientUploadError) Error() string { return e.message }
 
-func (s *Server) storeUpload(file io.Reader, originalName, remoteIP string) (uploadMetadata, error) {
+func (s *Server) storeUpload(file io.Reader, originalName, remoteIP, galleryName string) (uploadMetadata, error) {
 	reader := bufio.NewReader(file)
 	peek, err := reader.Peek(512)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -329,28 +352,27 @@ func (s *Server) storeUpload(file io.Reader, originalName, remoteIP string) (upl
 	}
 
 	now := s.now().UTC()
-	randomPart := make([]byte, 8)
-	if _, err := rand.Read(randomPart); err != nil {
-		return uploadMetadata{}, err
+	if strings.TrimSpace(galleryName) == "" {
+		galleries, listErr := s.galleryList()
+		if listErr != nil || len(galleries) == 0 {
+			return uploadMetadata{}, listErr
+		}
+		galleryName = galleries[0].Name
 	}
-	base := strings.TrimSuffix(filepath.Base(originalName), filepath.Ext(originalName))
-	base = strings.Trim(safeFilename.ReplaceAllString(base, "-"), "-._")
-	if base == "" {
-		base = "foto"
+	galleryPath, cleanGallery, err := s.resolveGallery(galleryName)
+	if err != nil {
+		return uploadMetadata{}, &clientUploadError{http.StatusBadRequest, "Bitte eine gültige Galerie auswählen."}
 	}
-	if len(base) > 50 {
-		base = base[:50]
-	}
-	storedName := fmt.Sprintf("%s_%s_%s%s", now.Format("20060102_150405.000"), base, hex.EncodeToString(randomPart), extension)
-	finalPath := filepath.Join(s.cfg.UploadDir, storedName)
-	temp, err := os.CreateTemp(s.cfg.UploadDir, ".upload-*")
+	cleanOriginal := sanitizeOriginalFilename(originalName, preferredOriginalExtension(originalName, extension))
+	temp, err := os.CreateTemp(galleryPath, ".upload-*")
 	if err != nil {
 		return uploadMetadata{}, err
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 
-	written, copyErr := io.Copy(temp, reader)
+	hash := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(temp, hash), reader)
 	if copyErr != nil {
 		temp.Close()
 		return uploadMetadata{}, copyErr
@@ -366,9 +388,16 @@ func (s *Server) storeUpload(file io.Reader, originalName, remoteIP string) (upl
 	if err := temp.Close(); err != nil {
 		return uploadMetadata{}, err
 	}
-	if err := os.Rename(tempPath, finalPath); err != nil {
+	s.filenameMu.Lock()
+	storedFilename, finalPath, err := availableFilename(galleryPath, cleanOriginal)
+	if err == nil {
+		err = os.Rename(tempPath, finalPath)
+	}
+	s.filenameMu.Unlock()
+	if err != nil {
 		return uploadMetadata{}, err
 	}
+	storedName := filepath.ToSlash(filepath.Join(cleanGallery, storedFilename))
 
 	metadata := uploadMetadata{
 		StoredName:   storedName,
@@ -377,6 +406,8 @@ func (s *Server) storeUpload(file io.Reader, originalName, remoteIP string) (upl
 		Size:         written,
 		RemoteIP:     remoteIP,
 		UploadedAt:   now.Format(time.RFC3339Nano),
+		Gallery:      cleanGallery,
+		SHA256:       hex.EncodeToString(hash.Sum(nil)),
 	}
 	return metadata, nil
 }
@@ -397,14 +428,11 @@ func (s *Server) appendMetadata(metadata uploadMetadata) error {
 func (s *Server) deleteMedia(name string) error {
 	s.metaMu.Lock()
 	defer s.metaMu.Unlock()
+	metadataKey := s.storageKey(name)
 
-	mediaPath := filepath.Join(s.cfg.UploadDir, name)
-	info, err := os.Stat(mediaPath)
+	mediaPath, err := s.resolveMediaPath(name)
 	if err != nil {
 		return err
-	}
-	if !info.Mode().IsRegular() {
-		return os.ErrNotExist
 	}
 
 	randomPart, err := randomHex(8)
@@ -447,7 +475,7 @@ func (s *Server) deleteMedia(name string) error {
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
 		var item uploadMetadata
-		if json.Unmarshal(line, &item) == nil && item.StoredName == name {
+		if json.Unmarshal(line, &item) == nil && (item.StoredName == name || item.StoredName == metadataKey) {
 			continue
 		}
 		if _, err := temp.Write(append(line, '\n')); err != nil {
@@ -491,26 +519,37 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata, err := s.readMetadata()
+	gallery := strings.TrimSpace(r.URL.Query().Get("gallery"))
+	if gallery != "" {
+		if _, _, err := s.resolveGallery(gallery); err != nil {
+			writeJSONError(w, http.StatusNotFound, "Galerie wurde nicht gefunden.")
+			return
+		}
+	}
+	items, err := s.scanMedia(gallery)
 	if err != nil {
 		log.Printf("read gallery metadata: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Galerie konnte nicht geladen werden.")
 		return
 	}
-	items := make([]publicMedia, 0, len(metadata))
-	for _, item := range metadata {
-		if !storedMediaName.MatchString(item.StoredName) {
-			continue
+	sortMode := r.URL.Query().Get("sort")
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := items[i].CapturedAt, items[j].CapturedAt
+		if left == "" {
+			left = items[i].UploadedAt
 		}
-		if _, err := os.Stat(filepath.Join(s.cfg.UploadDir, item.StoredName)); err != nil {
-			continue
+		if right == "" {
+			right = items[j].UploadedAt
 		}
-		if !s.settings.isPublic(item.StoredName) {
-			continue
+		switch sortMode {
+		case "captured_asc":
+			return left < right
+		case "name_asc":
+			return strings.ToLower(items[i].Filename) < strings.ToLower(items[j].Filename)
+		default:
+			return left > right
 		}
-		items = append(items, s.toPublicMedia(item))
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UploadedAt > items[j].UploadedAt })
+	})
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -521,28 +560,6 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 		"slideshow_interval_seconds": settings.SlideshowIntervalSeconds,
 		"slideshow_shuffle":          settings.SlideshowShuffle,
 	})
-}
-
-func (s *Server) toPublicMedia(item uploadMetadata) publicMedia {
-	kind := "video"
-	if strings.HasPrefix(item.ContentType, "image/") {
-		kind = "image"
-	}
-	media := publicMedia{
-		ID:          item.StoredName,
-		URL:         "/m/" + url.PathEscape(s.cfg.UploadToken) + "/" + url.PathEscape(item.StoredName),
-		Kind:        kind,
-		ContentType: item.ContentType,
-		Size:        item.Size,
-		UploadedAt:  item.UploadedAt,
-		IsChallenge: item.IsChallenge,
-		Challenge:   item.Challenge,
-		ChallengeBy: item.ChallengeBy,
-	}
-	if item.IsChallenge {
-		media.GuestName = item.GuestName
-	}
-	return media
 }
 
 func (s *Server) readMetadata() ([]uploadMetadata, error) {
@@ -579,17 +596,18 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, tokenErr := url.PathUnescape(parts[0])
-	name, nameErr := url.PathUnescape(parts[1])
-	if tokenErr != nil || nameErr != nil || !s.validToken(token) || !storedMediaName.MatchString(name) {
+	id, idErr := url.PathUnescape(parts[1])
+	relative, decodeErr := decodeMediaID(id)
+	if tokenErr != nil || idErr != nil || decodeErr != nil || !s.validToken(token) {
 		http.NotFound(w, r)
 		return
 	}
-	if !s.settings.isPublic(name) && !s.validSettingsSession(r) {
+	if !s.settings.isPublic(s.storageKey(relative)) && !s.validSettingsSession(r) {
 		http.NotFound(w, r)
 		return
 	}
-	path := filepath.Join(s.cfg.UploadDir, name)
-	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+	path, err := s.resolveMediaPath(relative)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}

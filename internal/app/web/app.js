@@ -15,6 +15,7 @@
   const uploadButton = document.querySelector('#upload-button');
   const uploadButtonLabel = document.querySelector('#upload-button-label');
   const guestName = document.querySelector('#guest-name');
+	const gallerySelect = document.querySelector('#gallery-select');
   const result = document.querySelector('#result');
   const resultMessage = document.querySelector('#result-message');
   const moreButton = document.querySelector('#more-button');
@@ -157,6 +158,7 @@
       };
       const form = new FormData();
       form.append('guest_name', guestName.value.trim());
+	  form.append('gallery', gallerySelect.value);
       form.append('is_challenge', challengeToggle.checked ? 'true' : 'false');
       if (challengeToggle.checked) {
         form.append('challenge', challengeText.value.trim());
@@ -254,6 +256,26 @@
   uploadButton.addEventListener('click', uploadAll);
   moreButton.addEventListener('click', reset);
 
+	async function loadGalleries() {
+	  try {
+		const response = await fetch('/api/galleries', { headers: { 'X-Upload-Token': token }, cache: 'no-store' });
+		if (!response.ok) throw new Error();
+		const payload = await response.json();
+		gallerySelect.replaceChildren(...payload.galleries.map((gallery) => {
+		  const option = document.createElement('option');
+		  option.value = gallery.name;
+		  option.textContent = gallery.name;
+		  return option;
+		}));
+	  } catch (_) {
+		gallerySelect.replaceChildren();
+		const option = document.createElement('option');
+		option.value = '';
+		option.textContent = 'Galerien nicht erreichbar';
+		gallerySelect.append(option);
+	  }
+	}
+
   ['dragenter', 'dragover'].forEach((name) => dropZone.addEventListener(name, (event) => {
     event.preventDefault();
     dropZone.classList.add('is-dragging');
@@ -263,4 +285,5 @@
     dropZone.classList.remove('is-dragging');
   }));
   dropZone.addEventListener('drop', (event) => addFiles(event.dataTransfer.files));
+	loadGalleries();
 })();

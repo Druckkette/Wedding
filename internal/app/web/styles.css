@@ -165,7 +165,7 @@ h1 {
 .name-field { display: block; margin-top: 25px; }
 .name-field span { display: block; margin-bottom: 8px; font-size: .82rem; font-weight: 700; letter-spacing: .03em; }
 .name-field small { color: var(--muted); font-weight: 400; }
-.name-field input {
+.name-field input, .name-field select {
   width: 100%;
   padding: 14px 15px;
   border: 1px solid #d8d7cf;
@@ -174,7 +174,9 @@ h1 {
   background: var(--white);
   color: var(--ink);
 }
-.name-field input:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(102,121,101,.12); }
+.name-field input:focus, .name-field select:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(102,121,101,.12); }
+.name-field select { appearance: none; background: var(--white) linear-gradient(45deg, transparent 50%, var(--sage) 50%) calc(100% - 18px) 52% / 6px 6px no-repeat; }
+.name-field > small { display: block; margin-top: 7px; line-height: 1.4; }
 
 .drop-zone {
   display: flex;

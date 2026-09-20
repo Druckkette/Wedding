@@ -1,12 +1,15 @@
 package app
 
 import (
+	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,18 +80,12 @@ func TestJPEGUploadIsStoredWithoutModification(t *testing.T) {
 		t.Fatalf("got %d: %s", res.Code, res.Body.String())
 	}
 
-	files, err := os.ReadDir(cfg.UploadDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var imagePath string
-	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".jpg") {
-			imagePath = filepath.Join(cfg.UploadDir, file.Name())
-		}
-	}
+	imagePath := findStoredFile(t, cfg.UploadDir, ".jpeg")
 	if imagePath == "" {
 		t.Fatal("stored image not found")
+	}
+	if filepath.Base(imagePath) != "Urlaub 2026.jpeg" {
+		t.Fatalf("original filename not preserved: %s", filepath.Base(imagePath))
 	}
 	stored, err := os.ReadFile(imagePath)
 	if err != nil {
@@ -109,6 +106,9 @@ func TestJPEGUploadIsStoredWithoutModification(t *testing.T) {
 	}
 	if metadata.OriginalName != "Urlaub 2026.jpeg" || metadata.GuestName != "Anna & Ben" {
 		t.Fatalf("unexpected metadata: %+v", metadata)
+	}
+	if metadata.Gallery != defaultGalleryName || len(metadata.SHA256) != 64 {
+		t.Fatalf("gallery/checksum metadata missing: %+v", metadata)
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/media", nil)
@@ -155,6 +155,110 @@ func TestHEICDetection(t *testing.T) {
 	}
 }
 
+func TestJPEGEXIFDateTimeOriginalIsReadWithoutChangingFile(t *testing.T) {
+	tiff := make([]byte, 76)
+	copy(tiff[:2], "II")
+	binary.LittleEndian.PutUint16(tiff[2:4], 42)
+	binary.LittleEndian.PutUint32(tiff[4:8], 8)
+	binary.LittleEndian.PutUint16(tiff[8:10], 1)
+	binary.LittleEndian.PutUint16(tiff[10:12], 0x8769)
+	binary.LittleEndian.PutUint16(tiff[12:14], 4)
+	binary.LittleEndian.PutUint32(tiff[14:18], 1)
+	binary.LittleEndian.PutUint32(tiff[18:22], 26)
+	binary.LittleEndian.PutUint16(tiff[26:28], 1)
+	binary.LittleEndian.PutUint16(tiff[28:30], 0x9003)
+	binary.LittleEndian.PutUint16(tiff[30:32], 2)
+	binary.LittleEndian.PutUint32(tiff[32:36], 20)
+	binary.LittleEndian.PutUint32(tiff[36:40], 44)
+	copy(tiff[44:64], []byte("2026:09:05 14:23:17\x00"))
+	payload := append([]byte("Exif\x00\x00"), tiff...)
+	jpeg := []byte{0xff, 0xd8, 0xff, 0xe1, byte((len(payload) + 2) >> 8), byte(len(payload) + 2)}
+	jpeg = append(jpeg, payload...)
+	jpeg = append(jpeg, 0xff, 0xd9)
+	path := filepath.Join(t.TempDir(), "capture.jpg")
+	if err := os.WriteFile(path, jpeg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	metadata := readImageMetadata(path)
+	after, _ := os.ReadFile(path)
+	if metadata.CapturedAt != "2026-09-05T14:23:17" {
+		t.Fatalf("unexpected capture time: %q", metadata.CapturedAt)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("metadata reader modified the original")
+	}
+}
+
+func TestNASFoldersBecomeGalleriesAndDownloadsUseOriginals(t *testing.T) {
+	cfg := testConfig(t)
+	photo := append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, bytes.Repeat([]byte{0x64}, 700)...)
+	galleryDir := filepath.Join(cfg.UploadDir, "Freie Trauung")
+	if err := os.MkdirAll(galleryDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cfg.UploadDir, "@eaDir"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(galleryDir, "Küsse & Grüße.jpg"), photo, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	galleryReq := httptest.NewRequest(http.MethodGet, "/api/galleries", nil)
+	galleryReq.Header.Set("X-Upload-Token", testToken)
+	galleryRes := httptest.NewRecorder()
+	handler.ServeHTTP(galleryRes, galleryReq)
+	if galleryRes.Code != http.StatusOK || strings.Contains(galleryRes.Body.String(), "@eaDir") || !strings.Contains(galleryRes.Body.String(), "Freie Trauung") {
+		t.Fatalf("unexpected galleries: %d %s", galleryRes.Code, galleryRes.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/media?gallery="+url.QueryEscape("Freie Trauung")+"&sort=captured_asc", nil)
+	listReq.Header.Set("X-Upload-Token", testToken)
+	listRes := httptest.NewRecorder()
+	handler.ServeHTTP(listRes, listReq)
+	var payload struct {
+		Items []publicMedia `json:"items"`
+	}
+	if err := json.NewDecoder(listRes.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].Filename != "Küsse & Grüße.jpg" {
+		t.Fatalf("unexpected items: %+v", payload.Items)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, payload.Items[0].DownloadURL, nil)
+	downloadReq.Header.Set("X-Upload-Token", testToken)
+	downloadRes := httptest.NewRecorder()
+	handler.ServeHTTP(downloadRes, downloadReq)
+	if downloadRes.Code != http.StatusOK || !bytes.Equal(downloadRes.Body.Bytes(), photo) {
+		t.Fatal("single download changed original bytes")
+	}
+
+	zipReq := jsonRequest(t, http.MethodPost, "/api/download/zip", map[string]any{"gallery": "Freie Trauung", "ids": []string{payload.Items[0].ID}}, nil)
+	zipRes := httptest.NewRecorder()
+	handler.ServeHTTP(zipRes, zipReq)
+	reader, err := zip.NewReader(bytes.NewReader(zipRes.Body.Bytes()), int64(zipRes.Body.Len()))
+	if err != nil || len(reader.File) != 1 {
+		t.Fatalf("invalid zip download: %v", err)
+	}
+	entry, err := reader.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var extracted bytes.Buffer
+	if _, err := extracted.ReadFrom(entry); err != nil {
+		t.Fatal(err)
+	}
+	entry.Close()
+	if reader.File[0].Name != "Küsse & Grüße.jpg" || !bytes.Equal(extracted.Bytes(), photo) {
+		t.Fatal("ZIP did not contain the unchanged original")
+	}
+}
+
 func TestMP4VideoUploadIsStoredWithoutModification(t *testing.T) {
 	cfg := testConfig(t)
 	handler, err := New(cfg)
@@ -173,15 +277,9 @@ func TestMP4VideoUploadIsStoredWithoutModification(t *testing.T) {
 		t.Fatalf("got %d: %s", res.Code, res.Body.String())
 	}
 
-	files, err := os.ReadDir(cfg.UploadDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".mp4") {
-			continue
-		}
-		stored, err := os.ReadFile(filepath.Join(cfg.UploadDir, file.Name()))
+	videoPath := findStoredFile(t, cfg.UploadDir, ".mp4")
+	if videoPath != "" {
+		stored, err := os.ReadFile(videoPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -460,7 +558,8 @@ func TestSettingsModerateUploadsAndChangePassword(t *testing.T) {
 	if deleteRes.Code != http.StatusOK {
 		t.Fatalf("delete media: got %d: %s", deleteRes.Code, deleteRes.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(cfg.UploadDir, item.ID)); !errors.Is(err, os.ErrNotExist) {
+	relative, _ := decodeMediaID(item.ID)
+	if _, err := os.Stat(filepath.Join(cfg.UploadDir, filepath.FromSlash(relative))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("deleted media still exists: %v", err)
 	}
 	deletedMediaRes := httptest.NewRecorder()
@@ -554,17 +653,32 @@ func jsonRequest(t *testing.T, method, path string, payload any, cookie *http.Co
 
 func countStoredMedia(t *testing.T, dir string) int {
 	t.Helper()
-	files, err := os.ReadDir(dir)
+	count := 0
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && entry.Type().IsRegular() && isSupportedMediaName(entry.Name()) {
+			count++
+		}
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	count := 0
-	for _, file := range files {
-		if storedMediaName.MatchString(file.Name()) {
-			count++
-		}
-	}
 	return count
+}
+
+func findStoredFile(t *testing.T, dir, suffix string) string {
+	t.Helper()
+	var found string
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && entry.Type().IsRegular() && strings.HasSuffix(strings.ToLower(entry.Name()), suffix) {
+			found = path
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
 }
 
 func uploadRequest(t *testing.T, filename string, content []byte, token string) *http.Request {

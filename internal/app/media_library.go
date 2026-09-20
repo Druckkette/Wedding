@@ -17,7 +17,10 @@ import (
 	"time"
 )
 
-const defaultGalleryName = "Gäste-Uploads"
+const (
+	defaultGalleryName   = "Gäste-Uploads"
+	challengeGalleryName = "Fotochallenge"
+)
 
 var ignoredGalleryNames = map[string]bool{
 	"@eadir": true, "#recycle": true, "thumbs": true, "thumbnails": true,

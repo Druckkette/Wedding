@@ -137,6 +137,13 @@ func New(cfg Config) (http.Handler, error) {
 		sessions:        newSessionStore(),
 		now:             time.Now,
 	}
+	migratedChallenges, err := s.migrateChallengeGallery()
+	if err != nil {
+		return nil, fmt.Errorf("migrate challenge gallery: %w", err)
+	}
+	if migratedChallenges > 0 {
+		log.Printf("challenge gallery migration: moved=%d", migratedChallenges)
+	}
 	return s.securityHeaders(http.HandlerFunc(s.route)), nil
 }
 
@@ -316,6 +323,13 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		metadata.Challenge = challengeText
 		metadata.ChallengeBy = challengeBy
+		metadata, err = s.moveUploadToGallery(metadata, challengeGalleryName)
+		if err != nil {
+			s.removeStoredUpload(metadata.StoredName)
+			log.Printf("move challenge upload to gallery: %v", err)
+			writeJSONError(w, http.StatusInternalServerError, "Challenge-Foto konnte nicht einsortiert werden.")
+			return
+		}
 	}
 	if err := s.appendMetadata(metadata); err != nil {
 		log.Printf("append metadata for %s: %v", metadata.StoredName, err)

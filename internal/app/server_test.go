@@ -377,6 +377,12 @@ func TestChallengeAppearsInGalleryAndMediaIsProtected(t *testing.T) {
 	if !item.IsChallenge || item.Challenge != "Tanzt mit dem Brautpaar" || item.ChallengeBy != "Mia & Tom" || item.GuestName != "Anna & Ben" {
 		t.Fatalf("unexpected challenge: %+v", item)
 	}
+	if item.Gallery != challengeGalleryName {
+		t.Fatalf("challenge gallery = %q, want %q", item.Gallery, challengeGalleryName)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.UploadDir, challengeGalleryName, item.Filename)); err != nil {
+		t.Fatalf("challenge was not stored in its gallery: %v", err)
+	}
 	if strings.Contains(string(responseBody), "remote_ip") || strings.Contains(string(responseBody), "original_name") {
 		t.Fatal("private upload metadata leaked through gallery API")
 	}
@@ -392,6 +398,48 @@ func TestChallengeAppearsInGalleryAndMediaIsProtected(t *testing.T) {
 	handler.ServeHTTP(wrongMediaRes, wrongMediaReq)
 	if wrongMediaRes.Code != http.StatusNotFound {
 		t.Fatalf("wrong media token: got %d", wrongMediaRes.Code)
+	}
+}
+
+func TestExistingChallengeIsMigratedIntoChallengeGallery(t *testing.T) {
+	cfg := testConfig(t)
+	jpeg := append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, bytes.Repeat([]byte{0x42}, 700)...)
+	legacyName := "alte-challenge.jpg"
+	if err := os.WriteFile(filepath.Join(cfg.UploadDir, legacyName), jpeg, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	metadataFile, err := os.Create(filepath.Join(cfg.UploadDir, "uploads.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := uploadMetadata{
+		StoredName: legacyName, OriginalName: legacyName, ContentType: "image/jpeg", Size: int64(len(jpeg)),
+		UploadedAt: "2026-09-05T14:00:00Z", IsChallenge: true, Challenge: "Gruppenfoto", ChallengeBy: "Tisch 4",
+	}
+	if err := json.NewEncoder(metadataFile).Encode(metadata); err != nil {
+		metadataFile.Close()
+		t.Fatal(err)
+	}
+	if err := metadataFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.UploadDir, legacyName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy challenge still exists at old path: %v", err)
+	}
+	if stored, err := os.ReadFile(filepath.Join(cfg.UploadDir, challengeGalleryName, legacyName)); err != nil || !bytes.Equal(stored, jpeg) {
+		t.Fatalf("migrated challenge differs from original: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/media?gallery="+url.QueryEscape(challengeGalleryName), nil)
+	listReq.Header.Set("X-Upload-Token", testToken)
+	listRes := httptest.NewRecorder()
+	handler.ServeHTTP(listRes, listReq)
+	if listRes.Code != http.StatusOK || !strings.Contains(listRes.Body.String(), `"gallery":"Fotochallenge"`) || !strings.Contains(listRes.Body.String(), `"is_challenge":true`) {
+		t.Fatalf("migrated challenge missing from gallery: %d %s", listRes.Code, listRes.Body.String())
 	}
 }
 

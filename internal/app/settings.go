@@ -219,6 +219,32 @@ func (s *settingsStore) removeMedia(name string) error {
 	return nil
 }
 
+// copyMediaStatuses keeps the previous keys as a rollback-safe compatibility
+// entry while assigning the same moderation state to moved media.
+func (s *settingsStore) copyMediaStatuses(renames map[string]string) error {
+	if len(renames) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := cloneSettings(s.state)
+	changed := false
+	for oldName, newName := range renames {
+		if status, exists := next.Media[oldName]; exists && next.Media[newName] == "" {
+			next.Media[newName] = status
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := s.saveLocked(next); err != nil {
+		return err
+	}
+	s.state = next
+	return nil
+}
+
 func (s *settingsStore) status(name string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

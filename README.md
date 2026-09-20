@@ -76,6 +76,8 @@ Backups sollten mindestens den Ordner aus `NAS_UPLOAD_DIR` umfassen. Dort liegen
 
 Jeder direkte, nicht versteckte Unterordner von `NAS_UPLOAD_DIR` ist eine Galerie und zugleich ein mögliches Uploadziel. Ordner wie `@eaDir`, `#recycle`, `cache`, `thumbnails` und `previews` werden ignoriert. Gibt es noch keinen Galerieordner, wird einmalig `Gäste-Uploads` angelegt. Medien aus älteren Installationen, die direkt im Wurzelordner liegen, bleiben über diese Galerie sichtbar und müssen nicht migriert werden.
 
+Challenge-Fotos werden automatisch in der Galerie `Fotochallenge` gespeichert. Beim Serverstart werden auch Challenge-Fotos aus älteren Installationen dorthin verschoben; Challenge-Zuordnung und Moderationsstatus werden dabei mitgeführt.
+
 Der Datenfluss ist bewusst verlustfrei:
 
 ```text

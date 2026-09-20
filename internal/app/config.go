@@ -15,6 +15,7 @@ type Config struct {
 	UploadToken       string
 	EventTitle        string
 	EventSubtitle     string
+	EventTimezone     string
 	SettingsPassword  string
 	MaxUploadsPerHour int
 	ReadHeaderTimeout time.Duration
@@ -30,6 +31,7 @@ func ConfigFromEnv() (Config, error) {
 		UploadToken:       strings.TrimSpace(os.Getenv("UPLOAD_TOKEN")),
 		EventTitle:        envOr("EVENT_TITLE", "Unsere Hochzeit"),
 		EventSubtitle:     envOr("EVENT_SUBTITLE", "Haltet eure schönsten Momente mit uns fest."),
+		EventTimezone:     envOr("EVENT_TIMEZONE", "Europe/Berlin"),
 		SettingsPassword:  strings.TrimSpace(os.Getenv("SETTINGS_PASSWORD")),
 		MaxUploadsPerHour: 120,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -54,6 +56,9 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if len(cfg.SettingsPassword) < 6 || len(cfg.SettingsPassword) > 128 {
 		return Config{}, errors.New("SETTINGS_PASSWORD must contain between 6 and 128 characters")
+	}
+	if _, err := time.LoadLocation(cfg.EventTimezone); err != nil {
+		return Config{}, fmt.Errorf("EVENT_TIMEZONE is invalid: %w", err)
 	}
 	return cfg, nil
 }

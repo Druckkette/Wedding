@@ -5,9 +5,92 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
+
+type captureTimeSyncStats struct {
+	Updated   int
+	Unchanged int
+	Missing   int
+	Failed    int
+}
+
+func loadCaptureLocation(name string) (*time.Location, error) {
+	if strings.TrimSpace(name) == "" {
+		name = "Europe/Berlin"
+	}
+	return time.LoadLocation(name)
+}
+
+// applyImageCaptureTime mirrors EXIF DateTimeOriginal to the filesystem
+// timestamps without rewriting the image itself. The embedded EXIF block,
+// including GPS and camera data, therefore stays byte-for-byte untouched.
+func applyImageCaptureTime(path string, location *time.Location) (bool, bool, error) {
+	metadata := readImageMetadata(path)
+	if metadata.CapturedAt == "" {
+		return false, false, nil
+	}
+	captured, err := time.ParseInLocation("2006-01-02T15:04:05", metadata.CapturedAt, location)
+	if err != nil {
+		return true, false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return true, false, err
+	}
+	if info.ModTime().Equal(captured) {
+		return true, false, nil
+	}
+	if err := os.Chtimes(path, captured, captured); err != nil {
+		return true, false, err
+	}
+	return true, true, nil
+}
+
+func syncImageCaptureTimes(root string, location *time.Location) captureTimeSyncStats {
+	stats := captureTimeSyncStats{}
+	apply := func(path string) {
+		found, changed, err := applyImageCaptureTime(path, location)
+		switch {
+		case err != nil:
+			stats.Failed++
+		case !found:
+			stats.Missing++
+		case changed:
+			stats.Updated++
+		default:
+			stats.Unchanged++
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		stats.Failed++
+		return stats
+	}
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && !strings.HasPrefix(entry.Name(), ".") && strings.HasPrefix(mediaContentType(entry.Name()), "image/") {
+			apply(filepath.Join(root, entry.Name()))
+			continue
+		}
+		if !entry.IsDir() || !validGalleryName(entry.Name()) {
+			continue
+		}
+		children, readErr := os.ReadDir(filepath.Join(root, entry.Name()))
+		if readErr != nil {
+			stats.Failed++
+			continue
+		}
+		for _, child := range children {
+			if child.Type().IsRegular() && !strings.HasPrefix(child.Name(), ".") && strings.HasPrefix(mediaContentType(child.Name()), "image/") {
+				apply(filepath.Join(root, entry.Name(), child.Name()))
+			}
+		}
+	}
+	return stats
+}
 
 // readImageMetadata only reads the file. It never rewrites or normalizes the
 // original. JPEG/TIFF capture time, GPS and dimensions plus PNG dimensions are

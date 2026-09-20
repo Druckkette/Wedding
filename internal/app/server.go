@@ -38,6 +38,7 @@ type Server struct {
 	filenameMu      sync.Mutex
 	imageMetaMu     sync.Mutex
 	imageMetaCache  map[string]cachedImageMetadata
+	captureLocation *time.Location
 	settings        *settingsStore
 	sessions        *sessionStore
 	now             func() time.Time
@@ -92,6 +93,14 @@ func New(cfg Config) (http.Handler, error) {
 	if err := verifyWritable(cfg.UploadDir); err != nil {
 		return nil, err
 	}
+	captureLocation, err := loadCaptureLocation(cfg.EventTimezone)
+	if err != nil {
+		return nil, fmt.Errorf("load event timezone: %w", err)
+	}
+	stats := syncImageCaptureTimes(cfg.UploadDir, captureLocation)
+	if stats.Updated > 0 || stats.Failed > 0 {
+		log.Printf("capture-time sync: updated=%d unchanged=%d missing=%d failed=%d", stats.Updated, stats.Unchanged, stats.Missing, stats.Failed)
+	}
 
 	settings, err := newSettingsStore(cfg.UploadDir, cfg.SettingsPassword)
 	if err != nil {
@@ -123,6 +132,7 @@ func New(cfg Config) (http.Handler, error) {
 		settingsLimiter: newRateLimiter(12, 15*time.Minute),
 		writeGate:       make(chan struct{}, 4),
 		imageMetaCache:  make(map[string]cachedImageMetadata),
+		captureLocation: captureLocation,
 		settings:        settings,
 		sessions:        newSessionStore(),
 		now:             time.Now,
@@ -398,6 +408,9 @@ func (s *Server) storeUpload(file io.Reader, originalName, remoteIP, galleryName
 		return uploadMetadata{}, err
 	}
 	storedName := filepath.ToSlash(filepath.Join(cleanGallery, storedFilename))
+	if _, _, err := applyImageCaptureTime(finalPath, s.captureLocation); err != nil {
+		log.Printf("set capture time for %s: %v", storedName, err)
+	}
 
 	metadata := uploadMetadata{
 		StoredName:   storedName,

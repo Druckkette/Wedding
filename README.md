@@ -54,6 +54,7 @@ Im produktiven Einsatz gehört die App hinter einen HTTPS-Reverse-Proxy; der Con
 | `SETTINGS_PASSWORD` | – | Initiales Settings-Passwort mit mindestens 6 Zeichen; spätere Änderungen werden gehasht auf dem NAS gespeichert |
 | `EVENT_TITLE` | `Unsere Hochzeit` | Überschrift der Upload-Seite |
 | `EVENT_SUBTITLE` | siehe `.env.example` | Einladungstext |
+| `EVENT_TIMEZONE` | `Europe/Berlin` | Zeitzone für EXIF-Aufnahmezeit und NAS-Dateidatum |
 | `MAX_UPLOADS_PER_HOUR` | `120` | Schutzlimit je IP-Adresse |
 | `HOST_PORT` | `18787` | Nur lokal gebundener Reverse-Proxy-Port |
 | `NAS_UPLOAD_DIR` | `/volume1/photo/Hochzeit-Uploads` | Persistenter Zielordner auf dem NAS |
@@ -82,7 +83,7 @@ Browser File → Multipart-Stream → temporäre Datei im Zielordner
              → fsync → atomisches Umbenennen → NAS-Original
 ```
 
-Es gibt dabei kein Canvas, Resizing, Re-Encoding oder automatisches Drehen. EXIF, IPTC, XMP, GPS und alle weiteren eingebetteten Daten bleiben bytegenau Bestandteil des Originals. `uploaded_at`, Dateigröße, MIME-Typ und SHA-256 werden ausschließlich separat in `uploads.jsonl` abgelegt. Das EXIF-Aufnahmedatum wird lesend aus JPEG/TIFF-Daten ermittelt und anhand Dateigröße plus Änderungszeit im Arbeitsspeicher gecacht; fehlende oder nicht unterstützte Metadaten fallen auf die Dateiänderungszeit zurück.
+Es gibt dabei kein Canvas, Resizing, Re-Encoding oder automatisches Drehen. EXIF, IPTC, XMP, GPS und alle weiteren eingebetteten Daten bleiben bytegenau Bestandteil des Originals. `uploaded_at`, Dateigröße, MIME-Typ und SHA-256 werden ausschließlich separat in `uploads.jsonl` abgelegt. Das EXIF-Aufnahmedatum wird lesend aus JPEG/TIFF-Daten ermittelt und anhand Dateigröße plus Änderungszeit im Arbeitsspeicher gecacht. Beim Upload und bei jedem Serverstart wird dieses Aufnahmedatum zusätzlich – unter Berücksichtigung von `EVENT_TIMEZONE` – als Zugriffs- und Änderungszeit der NAS-Datei gesetzt, ohne die Bilddatei umzuschreiben. Fehlt das Aufnahmedatum im Original, bleibt die Datei unverändert und die Galerie fällt auf die vorhandene Dateiänderungszeit zurück.
 
 Galerie und Vollbild verwenden derzeit das Original mit Browser-Lazy-Loading; es werden keine Preview-Dateien erzeugt. Beim Bildwechsel wird nur das vorherige und nächste Bild vorgeladen. Einzel- und ZIP-Downloads lesen dieselbe Originaldatei direkt vom NAS und kopieren sie ohne Bilddecoder oder Encoder in die HTTP-Antwort. ZIPs werden fortlaufend geschrieben und nicht vollständig im RAM aufgebaut.
 

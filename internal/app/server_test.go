@@ -190,6 +190,53 @@ func TestJPEGEXIFDateTimeOriginalIsReadWithoutChangingFile(t *testing.T) {
 	}
 }
 
+func TestCaptureTimeIsAppliedWithoutChangingImageBytes(t *testing.T) {
+	tiff := make([]byte, 76)
+	copy(tiff[:2], "II")
+	binary.LittleEndian.PutUint16(tiff[2:4], 42)
+	binary.LittleEndian.PutUint32(tiff[4:8], 8)
+	binary.LittleEndian.PutUint16(tiff[8:10], 1)
+	binary.LittleEndian.PutUint16(tiff[10:12], 0x8769)
+	binary.LittleEndian.PutUint16(tiff[12:14], 4)
+	binary.LittleEndian.PutUint32(tiff[14:18], 1)
+	binary.LittleEndian.PutUint32(tiff[18:22], 26)
+	binary.LittleEndian.PutUint16(tiff[26:28], 1)
+	binary.LittleEndian.PutUint16(tiff[28:30], 0x9003)
+	binary.LittleEndian.PutUint16(tiff[30:32], 2)
+	binary.LittleEndian.PutUint32(tiff[32:36], 20)
+	binary.LittleEndian.PutUint32(tiff[36:40], 44)
+	copy(tiff[44:64], []byte("2026:09:05 14:23:17\x00"))
+	payload := append([]byte("Exif\x00\x00"), tiff...)
+	jpeg := []byte{0xff, 0xd8, 0xff, 0xe1, byte((len(payload) + 2) >> 8), byte(len(payload) + 2)}
+	jpeg = append(jpeg, payload...)
+	jpeg = append(jpeg, 0xff, 0xd9)
+	path := filepath.Join(t.TempDir(), "capture.jpg")
+	if err := os.WriteFile(path, jpeg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	location, err := loadCaptureLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, changed, err := applyImageCaptureTime(path, location)
+	if err != nil || !found || !changed {
+		t.Fatalf("apply capture time: found=%t changed=%t err=%v", found, changed, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 5, 14, 23, 17, 0, location)
+	if !info.ModTime().Equal(want) {
+		t.Fatalf("modification time = %s, want %s", info.ModTime(), want)
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("timestamp sync modified the image or its EXIF data")
+	}
+}
+
 func TestNASFoldersBecomeGalleriesAndDownloadsUseOriginals(t *testing.T) {
 	cfg := testConfig(t)
 	photo := append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, bytes.Repeat([]byte{0x64}, 700)...)

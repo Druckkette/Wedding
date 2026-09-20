@@ -1,0 +1,30 @@
+services:
+  wedding-upload:
+    build:
+      context: .
+    image: wedding-upload:local
+    container_name: wedding-upload
+    restart: unless-stopped
+    user: "${PUID:-1024}:${PGID:-100}"
+    env_file:
+      - .env
+    environment:
+      LISTEN_ADDR: ":8080"
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "127.0.0.1:${HOST_PORT:-18787}:8080"
+    volumes:
+      - "${NAS_UPLOAD_DIR:-/volume1/photo/Hochzeit-Uploads}:/data/uploads"
+    healthcheck:
+      test: ["CMD", "/wedding-upload", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL

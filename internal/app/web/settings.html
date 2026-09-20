@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f2ea">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="upload-token" content="{{.UploadToken}}">
+  <title>{{.Title}} – Settings</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/settings.css">
+</head>
+<body class="settings-page">
+  <main class="settings-shell">
+    <header class="settings-header">
+      <p class="eyebrow">Nur für das Hochzeitsteam</p>
+      <h1>Settings</h1>
+      <p>Freigaben und Beamer-Darstellung zentral steuern.</p>
+      <nav class="page-nav" aria-label="Hochzeitsfotos">
+        <a href="/u/{{.UploadToken}}">Hochladen</a>
+        <a href="/u/{{.UploadToken}}/gallery">Galerie</a>
+        <a href="/u/{{.UploadToken}}/slideshow">Diashow</a>
+        <a class="active" href="/u/{{.UploadToken}}/settings">Settings</a>
+      </nav>
+    </header>
+
+    <section class="settings-login settings-card" id="settings-login" aria-labelledby="login-heading">
+      <span class="settings-lock" aria-hidden="true">⌁</span>
+      <h2 id="login-heading">Geschützter Bereich</h2>
+      <p>Bitte das Settings-Passwort eingeben.</p>
+      <form id="login-form">
+        <label for="settings-password">Passwort</label>
+        <input id="settings-password" type="password" autocomplete="current-password" required>
+        <p class="settings-error" id="login-error" role="alert" hidden></p>
+        <button type="submit">Settings öffnen</button>
+      </form>
+    </section>
+
+    <div class="settings-dashboard" id="settings-dashboard" hidden>
+      <div class="settings-toolbar">
+        <div>
+          <span class="status-dot"></span>
+          <strong>Settings aktiv</strong>
+        </div>
+        <button id="logout-button" type="button">Abmelden</button>
+      </div>
+
+      <section class="settings-card control-card" aria-labelledby="moderation-heading">
+        <div class="control-copy">
+          <p class="settings-label">Moderation</p>
+          <h2 id="moderation-heading">Neue Aufnahmen zuerst prüfen</h2>
+          <p>Ist der Modus aktiv, bleiben neue Uploads aus Galerie und Diashow verborgen, bis sie freigegeben wurden.</p>
+        </div>
+        <label class="settings-switch" for="moderation-toggle">
+          <input id="moderation-toggle" type="checkbox">
+          <span aria-hidden="true"></span>
+          <strong id="moderation-label">Aus</strong>
+        </label>
+      </section>
+
+      <section class="settings-card" aria-labelledby="style-heading">
+        <p class="settings-label">Beamer</p>
+        <h2 id="style-heading">Darstellung der Bilder</h2>
+        <div class="style-options">
+          <label class="style-option">
+            <input type="radio" name="slideshow-style" value="classic">
+            <span class="style-preview classic-preview"><i></i></span>
+            <strong>Normal</strong>
+            <small>Ruhige, großflächige Einblendung</small>
+          </label>
+          <label class="style-option">
+            <input type="radio" name="slideshow-style" value="polaroid">
+            <span class="style-preview polaroid-preview"><i></i></span>
+            <strong>Polaroids</strong>
+            <small>Jedes Bild fliegt als Polaroid herein</small>
+          </label>
+        </div>
+        <form class="interval-form" id="interval-form">
+          <div class="interval-copy">
+            <label for="slideshow-interval">Wechselzeit</label>
+            <small>Wie lange jedes Bild auf dem Beamer sichtbar bleibt.</small>
+          </div>
+          <div class="interval-input">
+            <input id="slideshow-interval" type="number" min="3" max="300" step="1" inputmode="numeric" required>
+            <span>Sekunden</span>
+          </div>
+          <button type="submit">Übernehmen</button>
+          <p class="settings-error" id="interval-error" role="alert" hidden></p>
+          <p class="settings-success" id="interval-success" role="status" hidden></p>
+        </form>
+        <div class="shuffle-control">
+          <div class="control-copy">
+            <label for="shuffle-toggle">Bilder mischen</label>
+            <small>Spielt jede Runde in einer neuen zufälligen Reihenfolge ab. Neue Bilder behalten Vorrang.</small>
+          </div>
+          <label class="settings-switch" for="shuffle-toggle">
+            <input id="shuffle-toggle" type="checkbox">
+            <span aria-hidden="true"></span>
+            <strong id="shuffle-label">Aus</strong>
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-card moderation-card" aria-labelledby="queue-heading">
+        <div class="queue-heading">
+          <div>
+            <p class="settings-label">Medien</p>
+            <h2 id="queue-heading">Aufnahmen verwalten</h2>
+          </div>
+          <div class="queue-filters" role="group" aria-label="Aufnahmen filtern">
+            <button class="active" type="button" data-filter="pending">Offen <span id="pending-count">0</span></button>
+            <button type="button" data-filter="approved">Freigegeben</button>
+            <button type="button" data-filter="rejected">Ausgeblendet</button>
+          </div>
+        </div>
+        <p class="queue-empty" id="queue-empty" hidden>In diesem Bereich gibt es gerade keine Aufnahmen.</p>
+        <div class="moderation-grid" id="moderation-grid"></div>
+      </section>
+
+      <section class="settings-card password-card" aria-labelledby="password-heading">
+        <p class="settings-label">Sicherheit</p>
+        <h2 id="password-heading">Settings-Passwort ändern</h2>
+        <form id="password-form">
+          <label for="current-password">Aktuelles Passwort</label>
+          <input id="current-password" type="password" autocomplete="current-password" required>
+          <label for="new-password">Neues Passwort</label>
+          <input id="new-password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+          <label for="confirm-password">Neues Passwort wiederholen</label>
+          <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+          <p class="settings-error" id="password-error" role="alert" hidden></p>
+          <p class="settings-success" id="password-success" role="status" hidden></p>
+          <button type="submit">Passwort speichern</button>
+        </form>
+      </section>
+    </div>
+  </main>
+  <script src="/assets/settings.js" defer></script>
+</body>
+</html>

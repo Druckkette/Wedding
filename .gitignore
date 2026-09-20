@@ -1,0 +1,5 @@
+.env
+.DS_Store
+qr-code.png
+qr-code.svg
+deployment-url.txt

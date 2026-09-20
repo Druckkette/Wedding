@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111713">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="upload-token" content="{{.UploadToken}}">
+  <title>{{.Title}} – Live-Diashow</title>
+  <link rel="stylesheet" href="/assets/slideshow.css">
+</head>
+<body>
+  <main class="slideshow" id="slideshow">
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <section class="slide-stage" id="slide-stage" aria-live="polite">
+      <div class="waiting" id="waiting">
+        <span>♥</span>
+        <h1>{{.Title}}</h1>
+        <p>Die Live-Diashow wartet auf den ersten besonderen Moment.</p>
+      </div>
+    </section>
+
+    <section class="challenge-celebration" id="challenge-celebration" hidden>
+      <div class="confetti" id="confetti" aria-hidden="true"></div>
+      <p class="challenge-kicker">Challenge geschafft!</p>
+      <h2 id="challenge-who"></h2>
+      <p>haben die Challenge</p>
+      <strong id="challenge-what"></strong>
+      <p>gemeistert</p>
+    </section>
+
+    <div class="new-badge" id="new-badge" hidden>Neu in der Galerie</div>
+    <div class="slide-caption" id="slide-caption" hidden></div>
+    <div class="live-indicator"><i></i><span id="live-label">Live verbunden</span></div>
+    <div class="slide-counter" id="slide-counter"></div>
+
+    <nav class="slideshow-controls" aria-label="Diashow-Steuerung">
+      <a href="/u/{{.UploadToken}}/gallery">Galerie</a>
+      <a href="/u/{{.UploadToken}}/settings">Settings</a>
+      <button id="pause-button" type="button">Pause</button>
+      <button id="next-button" type="button">Weiter</button>
+      <button id="fullscreen-button" type="button">Vollbild</button>
+    </nav>
+  </main>
+  <script src="/assets/slideshow.js" defer></script>
+</body>
+</html>

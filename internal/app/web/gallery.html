@@ -27,19 +27,36 @@
     <section class="gallery-content" aria-live="polite">
 	  <div class="gallery-toolbar">
 		<label>Galerie<select id="gallery-select" aria-label="Galerie auswählen"></select></label>
+		<label id="person-filter-wrap" hidden>Person<select id="person-select" aria-label="Person auswählen"><option value="">Alle Personen</option></select></label>
 		<label>Sortierung<select id="sort-select" aria-label="Fotos sortieren">
 		  <option value="captured_desc">Aufnahmezeit · Neueste zuerst</option>
 		  <option value="captured_asc">Aufnahmezeit · Älteste zuerst</option>
 		  <option value="name_asc">Dateiname · A–Z</option>
 		</select></label>
+		<button class="face-search-button" id="face-search-button" type="button" hidden>⌾ Finde mich</button>
 		<div class="download-menu">
 		  <button id="download-menu-button" type="button" aria-expanded="false">Herunterladen</button>
 		  <div id="download-menu" hidden>
-			<button id="download-all" type="button">Alle Fotos herunterladen</button>
+			<button id="download-all" type="button">Alle angezeigten Fotos herunterladen</button>
 			<button id="select-download" type="button">Auswahl herunterladen</button>
 		  </div>
 		</div>
 	  </div>
+	  <section class="face-search-panel" id="face-search-panel" hidden aria-labelledby="face-search-heading">
+		<button class="face-search-close" id="face-search-close" type="button" aria-label="Gesichtssuche schließen">×</button>
+		<div>
+		  <p class="eyebrow">Gesichtssuche</p>
+		  <h2 id="face-search-heading">Finde deine Hochzeitsfotos</h2>
+		  <p>Lade ein Selfie hoch oder nimm direkt eines auf. Das Bild wird nur lokal auf unserem NAS ausgewertet und anschließend verworfen.</p>
+		</div>
+		<form id="face-search-form">
+		  <label class="face-selfie-input" for="face-selfie">Selfie auswählen
+			<input id="face-selfie" type="file" accept="image/*" capture="user" required>
+		  </label>
+		  <button type="submit">Meine Fotos finden</button>
+		</form>
+		<p class="face-search-status" id="face-search-status" role="status" hidden></p>
+	  </section>
 	  <div class="selection-bar" id="selection-bar" hidden>
 		<strong id="selection-count">0 Fotos ausgewählt</strong>
 		<div><button id="select-all" type="button">Alle auswählen</button><button id="clear-selection" type="button">Auswahl aufheben</button><button id="download-selection" type="button">Auswahl herunterladen</button><button id="cancel-selection" type="button">Abbrechen</button></div>

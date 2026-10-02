@@ -292,6 +292,19 @@ def write_json_atomic(path: Path, payload: object) -> None:
     temp_path.replace(path)
 
 
+def write_npz_atomic(path: Path, **arrays: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            np.savez_compressed(handle, **arrays)
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temp_name).replace(path)
+    finally:
+        Path(temp_name).unlink(missing_ok=True)
+
+
 def source_path(root: Path, media: str) -> Path:
     candidate = root / Path(media)
     if candidate.exists():
@@ -470,7 +483,7 @@ def main() -> int:
     }
 
     write_json_atomic(index_dir / "index.json", index_payload)
-    np.savez_compressed(
+    write_npz_atomic(
         index_dir / "embeddings.npz",
         embeddings=embeddings,
         media=media,

@@ -185,6 +185,20 @@ func (index *faceIndex) groupPhotoCount(id string) int {
 	return count
 }
 
+func (index *faceIndex) groupRepresentativeID(id string) string {
+	personIDs := index.personGroupIDs(id)
+	if len(personIDs) == 0 {
+		return id
+	}
+	representative := id
+	for candidate := range personIDs {
+		if candidate < representative {
+			representative = candidate
+		}
+	}
+	return representative
+}
+
 func validFacePersonID(value string) bool {
 	if len(value) < 2 || len(value) > 32 || value[0] != 'p' {
 		return false
@@ -383,7 +397,7 @@ func (s *Server) handleFaceSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,
 		"found":       true,
-		"person_id":   result.PersonID,
+		"person_id":   index.groupRepresentativeID(result.PersonID),
 		"name":        person.Name,
 		"photo_count": index.groupPhotoCount(result.PersonID),
 		"similarity":  result.Similarity,

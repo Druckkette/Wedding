@@ -15,6 +15,9 @@ INDEX_FILE = INDEX_DIR / "embeddings.npz"
 DETECTOR_MODEL = MODEL_DIR / "face_detection_yunet_2023mar.onnx"
 RECOGNIZER_MODEL = MODEL_DIR / "face_recognition_sface_2021dec.onnx"
 MATCH_THRESHOLD = float(os.environ.get("FACE_MATCH_THRESHOLD", "0.42"))
+SELFIE_DETECTOR_SCORE = float(os.environ.get("FACE_SELFIE_DETECTOR_SCORE", "0.65"))
+SELFIE_FALLBACK_SCORE = float(os.environ.get("FACE_SELFIE_FALLBACK_SCORE", "0.50"))
+SELFIE_MAX_DIMENSION = int(os.environ.get("FACE_SELFIE_MAX_DIMENSION", "3200"))
 MAX_SELFIE_BYTES = int(os.environ.get("FACE_MAX_SELFIE_BYTES", str(8 * 1024 * 1024)))
 
 app = FastAPI(title="Wedding face search", docs_url=None, redoc_url=None)
@@ -43,7 +46,7 @@ def _get_engine() -> tuple[cv.FaceDetectorYN, cv.FaceRecognizerSF]:
     if not _models_ready():
         raise RuntimeError("Face models are missing. Run the Mac face indexer first.")
     detector = cv.FaceDetectorYN.create(
-        str(DETECTOR_MODEL), "", (320, 320), 0.75, 0.3, 5000
+        str(DETECTOR_MODEL), "", (320, 320), SELFIE_DETECTOR_SCORE, 0.3, 5000
     )
     recognizer = cv.FaceRecognizerSF.create(str(RECOGNIZER_MODEL), "")
     _engine = (detector, recognizer)
@@ -86,25 +89,46 @@ def _embedding_from_bytes(payload: bytes) -> np.ndarray:
         raise ValueError("Das Selfie konnte nicht gelesen werden.")
 
     height, width = image.shape[:2]
-    max_dimension = 2200
-    scale = min(1.0, max_dimension / max(height, width))
+    scale = min(1.0, SELFIE_MAX_DIMENSION / max(height, width))
     if scale < 1.0:
         image = cv.resize(
             image,
             (max(1, round(width * scale)), max(1, round(height * scale))),
             interpolation=cv.INTER_AREA,
         )
-        height, width = image.shape[:2]
+
+    candidates = [
+        image,
+        cv.rotate(image, cv.ROTATE_90_CLOCKWISE),
+        cv.rotate(image, cv.ROTATE_90_COUNTERCLOCKWISE),
+        cv.rotate(image, cv.ROTATE_180),
+    ]
 
     with _engine_lock:
         detector, recognizer = _get_engine()
-        detector.setInputSize((width, height))
-        _, faces = detector.detect(image)
-        if faces is None or len(faces) == 0:
+        detected_image = None
+        detected_faces = None
+
+        for score in (SELFIE_DETECTOR_SCORE, SELFIE_FALLBACK_SCORE):
+            detector.setScoreThreshold(score)
+            for candidate in candidates:
+                candidate_height, candidate_width = candidate.shape[:2]
+                detector.setInputSize((candidate_width, candidate_height))
+                _, faces = detector.detect(candidate)
+                if faces is not None and len(faces) > 0:
+                    detected_image = candidate
+                    detected_faces = faces
+                    break
+            if detected_faces is not None:
+                break
+
+        detector.setScoreThreshold(SELFIE_DETECTOR_SCORE)
+
+        if detected_image is None or detected_faces is None:
             raise ValueError("Auf dem Selfie wurde kein Gesicht erkannt.")
 
-        face = max(faces, key=lambda row: float(row[2] * row[3]))
-        aligned = recognizer.alignCrop(image, face)
+        face = max(detected_faces, key=lambda row: float(row[2] * row[3]))
+        aligned = recognizer.alignCrop(detected_image, face)
         feature = recognizer.feature(aligned).reshape(-1).astype(np.float32)
 
     norm = float(np.linalg.norm(feature))

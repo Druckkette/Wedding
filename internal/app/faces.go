@@ -209,10 +209,15 @@ func (s *Server) handleFacePeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	people := make([]faceIndexPerson, 0)
+	type guestPerson struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		PhotoCount int    `json:"photo_count"`
+	}
+	people := make([]guestPerson, 0)
 	for _, person := range index.People {
 		if strings.TrimSpace(person.Name) != "" {
-			people = append(people, person)
+			people = append(people, guestPerson{ID: person.ID, Name: person.Name, PhotoCount: person.PhotoCount})
 		}
 	}
 	sort.Slice(people, func(i, j int) bool {

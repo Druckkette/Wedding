@@ -127,20 +127,25 @@
     if (!response.ok) throw new Error('gallery list failed');
     const payload = await response.json();
     const previous = gallerySelect.value;
-    gallerySelect.replaceChildren(...payload.galleries.map((gallery) => {
-      const option = document.createElement('option'); option.value = gallery.name;
-      option.textContent = `${gallery.name} (${gallery.count})`; return option;
-    }));
-    if (payload.galleries.some((gallery) => gallery.name === previous)) gallerySelect.value = previous;
+    const total = (payload.galleries || []).reduce((sum, gallery) => sum + Number(gallery.count || 0), 0);
+    const options = [new Option(`Alle Bilder (${total})`, '')];
+    (payload.galleries || []).forEach((gallery) => {
+      options.push(new Option(`${gallery.name} (${gallery.count})`, gallery.name));
+    });
+    gallerySelect.replaceChildren(...options);
+    if (previous && payload.galleries.some((gallery) => gallery.name === previous)) {
+      gallerySelect.value = previous;
+    } else {
+      gallerySelect.value = '';
+    }
   }
 
   async function refresh() {
     try {
       if (!gallerySelect.options.length) await loadGalleries();
       const query = new URLSearchParams({ sort: sortSelect.value });
+      if (gallerySelect.value) query.set('gallery', gallerySelect.value);
       if (personSelect.value) query.set('person', personSelect.value);
-      else query.set('gallery', gallerySelect.value);
-      gallerySelect.disabled = Boolean(personSelect.value);
       const response = await fetch(`/api/media?${query}`, { headers: headers(), cache: 'no-store' });
       if (!response.ok) throw new Error('gallery request failed');
       items = (await response.json()).items;
@@ -215,11 +220,11 @@
     const requestedIDs = ids.length ? ids : (personSelect.value ? items.filter((item) => item.kind === 'image').map((item) => item.id) : []);
     try {
       const response = await fetch('/api/download/zip', {
-        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: personSelect.value ? '' : gallerySelect.value, ids: requestedIDs }),
+        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: gallerySelect.value, ids: requestedIDs }),
       });
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Download fehlgeschlagen.'); }
       const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob());
-      link.download = `${gallerySelect.value}.zip`; link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+      link.download = `${gallerySelect.value || 'Hochzeitsfotos'}.zip`; link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 30000);
     } catch (error) { window.alert(error.message); }
     finally { button.disabled = false; button.textContent = label; }
   }
@@ -232,7 +237,7 @@
       try {
         const files = await Promise.all(chosen.map(originalFile));
         if (navigator.canShare({ files })) {
-          await navigator.share({ files, title: gallerySelect.value });
+          await navigator.share({ files, title: gallerySelect.value || 'Hochzeitsfotos' });
           return;
         }
       } catch (error) {
@@ -314,7 +319,7 @@
   document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); render(); updateSelectionUI(); });
   document.querySelector('#cancel-selection').addEventListener('click', endSelection);
   document.querySelector('#download-selection').addEventListener('click', downloadSelection);
-  gallerySelect.addEventListener('change', () => { selected.clear(); if (!personSelect.value) refresh(); });
+  gallerySelect.addEventListener('change', () => { selected.clear(); refresh(); });
   personSelect.addEventListener('change', () => { selected.clear(); refresh(); });
   sortSelect.addEventListener('change', refresh);
   faceSearchButton.addEventListener('click', showFaceSearch);

@@ -374,8 +374,14 @@ def main() -> int:
     )
     parser.add_argument("--photos", required=True, type=Path, help="NAS-Hochzeitsordner")
     parser.add_argument("--index-dir", type=Path, help="Standard: <photos>/.face-index")
-    parser.add_argument("--cluster-threshold", type=float, default=0.45)
-    parser.add_argument("--detector-score", type=float, default=0.75)
+    parser.add_argument("--cluster-threshold", type=float, default=0.37)
+    parser.add_argument("--detector-score", type=float, default=0.80)
+    parser.add_argument(
+        "--min-photos",
+        type=int,
+        default=2,
+        help="Mindestzahl unterschiedlicher Fotos pro Personencluster (Standard: 2)",
+    )
     parser.add_argument("--max-dimension", type=int, default=2200)
     args = parser.parse_args()
 
@@ -384,6 +390,8 @@ def main() -> int:
         parser.error(f"Fotoordner nicht gefunden: {root}")
     if not 0.363 <= args.cluster_threshold <= 0.85:
         parser.error("--cluster-threshold muss zwischen 0.363 und 0.85 liegen.")
+    if args.min_photos < 1:
+        parser.error("--min-photos muss mindestens 1 sein.")
 
     index_dir = (args.index_dir or (root / ".face-index")).expanduser().resolve()
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -427,8 +435,47 @@ def main() -> int:
     if not records:
         raise RuntimeError("Es wurden keine Gesichter erkannt.")
 
+    detected_faces = len(records)
     embeddings = np.stack([record.embedding for record in records]).astype(np.float32)
     assignments = greedy_clusters(embeddings, args.cluster_threshold)
+
+    cluster_photos: dict[int, set[str]] = defaultdict(set)
+    for record, cluster in zip(records, assignments.tolist()):
+        cluster_photos[cluster].add(record.media)
+
+    kept_clusters = {
+        cluster
+        for cluster, photos in cluster_photos.items()
+        if len(photos) >= args.min_photos
+    }
+    discarded_clusters = len(cluster_photos) - len(kept_clusters)
+    if not kept_clusters:
+        raise RuntimeError(
+            f"Kein Personencluster kommt auf mindestens {args.min_photos} unterschiedlichen Fotos vor."
+        )
+
+    cluster_map = {
+        old_cluster: new_cluster
+        for new_cluster, old_cluster in enumerate(sorted(kept_clusters))
+    }
+    keep_mask = np.asarray(
+        [cluster in kept_clusters for cluster in assignments.tolist()],
+        dtype=bool,
+    )
+    records = [
+        record
+        for record, keep in zip(records, keep_mask.tolist())
+        if keep
+    ]
+    embeddings = embeddings[keep_mask]
+    assignments = np.asarray(
+        [
+            cluster_map[cluster]
+            for cluster, keep in zip(assignments.tolist(), keep_mask.tolist())
+            if keep
+        ],
+        dtype=np.int32,
+    )
     person_ids = np.asarray(
         [f"p{cluster + 1:04d}" for cluster in assignments.tolist()],
         dtype="<U16",
@@ -470,11 +517,14 @@ def main() -> int:
             "recognizer": "OpenCV SFace face_recognition_sface_2021dec",
             "cluster_threshold": args.cluster_threshold,
             "detector_score": args.detector_score,
+            "min_photos": args.min_photos,
         },
         "stats": {
             "images": len(files),
+            "detected_faces": detected_faces,
             "faces": len(records),
             "people": len(people),
+            "discarded_single_photo_clusters": discarded_clusters,
             "failed_images": len(failed),
         },
         "people": people,
@@ -499,9 +549,11 @@ def main() -> int:
 
     print()
     print("Fertig.")
-    print(f"Bilder:    {len(files)}")
-    print(f"Gesichter: {len(records)}")
-    print(f"Personen:  {len(people)}")
+    print(f"Bilder:              {len(files)}")
+    print(f"Gesichter erkannt:   {detected_faces}")
+    print(f"Gesichter im Index:  {len(records)}")
+    print(f"Personen:            {len(people)}")
+    print(f"Verworfene Cluster:  {discarded_clusters} (< {args.min_photos} Fotos)")
     print(f"Index:     {index_dir}")
     if names:
         print(f"Übernommene Namen: {len(names)}")

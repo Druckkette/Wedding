@@ -33,11 +33,18 @@ type Server struct {
 	assets          http.Handler
 	limiter         *rateLimiter
 	settingsLimiter *rateLimiter
+	faceLimiter     *rateLimiter
 	writeGate       chan struct{}
 	metaMu          sync.Mutex
 	filenameMu      sync.Mutex
 	imageMetaMu     sync.Mutex
 	imageMetaCache  map[string]cachedImageMetadata
+	faceIndexMu     sync.Mutex
+	faceIndexCache  *faceIndex
+	faceIndexModNS  int64
+	faceIndexSize   int64
+	faceNamesModNS  int64
+	faceNamesSize   int64
 	captureLocation *time.Location
 	settings        *settingsStore
 	sessions        *sessionStore
@@ -130,6 +137,7 @@ func New(cfg Config) (http.Handler, error) {
 		assets:          http.FileServer(http.FS(assetFS)),
 		limiter:         newRateLimiter(cfg.MaxUploadsPerHour, time.Hour),
 		settingsLimiter: newRateLimiter(12, 15*time.Minute),
+		faceLimiter:     newRateLimiter(30, 15*time.Minute),
 		writeGate:       make(chan struct{}, 4),
 		imageMetaCache:  make(map[string]cachedImageMetadata),
 		captureLocation: captureLocation,
@@ -164,6 +172,16 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleMediaList(w, r)
 	case r.URL.Path == "/api/galleries" && r.Method == http.MethodGet:
 		s.handleGalleryList(w, r)
+	case r.URL.Path == "/api/faces/people" && r.Method == http.MethodGet:
+		s.handleFacePeople(w, r)
+	case r.URL.Path == "/api/faces/search" && r.Method == http.MethodPost:
+		s.handleFaceSearch(w, r)
+	case r.URL.Path == "/api/faces/admin" && r.Method == http.MethodGet:
+		s.handleFaceAdmin(w, r)
+	case r.URL.Path == "/api/faces/admin/name" && r.Method == http.MethodPost:
+		s.handleFaceAdminName(w, r)
+	case r.URL.Path == "/api/faces/admin/thumb" && r.Method == http.MethodGet:
+		s.handleFaceAdminThumb(w, r)
 	case r.URL.Path == "/api/download" && r.Method == http.MethodGet:
 		s.handleOriginalDownload(w, r)
 	case r.URL.Path == "/api/download/zip" && r.Method == http.MethodPost:
@@ -557,6 +575,10 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("read gallery metadata: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Galerie konnte nicht geladen werden.")
+		return
+	}
+	items, ok := s.filterMediaByFaceQuery(w, r, items)
+	if !ok {
 		return
 	}
 	sortMode := r.URL.Query().Get("sort")

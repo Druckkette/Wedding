@@ -179,9 +179,11 @@ def greedy_clusters(embeddings: np.ndarray, threshold: float) -> np.ndarray:
             sums.append(embedding.copy())
             counts.append(1)
             centroids.append(embedding.copy())
-            assignments.append(len(centroids))
-    
+            assignments.append(len(centroids) - 1)
+
     assignments_array = np.asarray(assignments, dtype=np.int32)
+    if assignments_array.size and int(assignments_array.max()) >= len(centroids):
+        raise RuntimeError("Interner Clusterindex ist ungültig.")
     if len(centroids) <= 1:
         return assignments_array
 

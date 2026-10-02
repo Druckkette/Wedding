@@ -10,6 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Docker Compose config
+        run: |
+          cp .env.example .env
+          docker compose config >/dev/null
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"

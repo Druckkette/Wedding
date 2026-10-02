@@ -374,7 +374,7 @@ def main() -> int:
     )
     parser.add_argument("--photos", required=True, type=Path, help="NAS-Hochzeitsordner")
     parser.add_argument("--index-dir", type=Path, help="Standard: <photos>/.face-index")
-    parser.add_argument("--cluster-threshold", type=float, default=0.45)
+    parser.add_argument("--cluster-threshold", type=float, default=0.55)
     parser.add_argument("--detector-score", type=float, default=0.65)
     parser.add_argument(
         "--min-photos",

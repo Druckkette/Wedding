@@ -7,6 +7,14 @@
   const liveStatus = document.querySelector('#live-status');
   const gallerySelect = document.querySelector('#gallery-select');
   const sortSelect = document.querySelector('#sort-select');
+  const personFilterWrap = document.querySelector('#person-filter-wrap');
+  const personSelect = document.querySelector('#person-select');
+  const faceSearchButton = document.querySelector('#face-search-button');
+  const faceSearchPanel = document.querySelector('#face-search-panel');
+  const faceSearchClose = document.querySelector('#face-search-close');
+  const faceSearchForm = document.querySelector('#face-search-form');
+  const faceSelfie = document.querySelector('#face-selfie');
+  const faceSearchStatus = document.querySelector('#face-search-status');
   const menuButton = document.querySelector('#download-menu-button');
   const menu = document.querySelector('#download-menu');
   const selectionBar = document.querySelector('#selection-bar');
@@ -25,6 +33,7 @@
   let selecting = false;
   let selected = new Set();
   let touchStart = null;
+  let facesLoaded = false;
 
   const headers = (extra = {}) => ({ 'X-Upload-Token': token, ...extra });
 
@@ -89,6 +98,30 @@
     count.textContent = `${items.length} ${items.length === 1 ? 'Aufnahme' : 'Aufnahmen'}`;
   }
 
+  async function loadFaces() {
+    try {
+      const response = await fetch('/api/faces/people', { headers: headers(), cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      facesLoaded = Boolean(payload.available);
+      if (!facesLoaded) return;
+
+      const current = personSelect.value;
+      const options = [new Option('Alle Personen', '')];
+      (payload.people || []).forEach((person) => {
+        options.push(new Option(`${person.name} (${person.photo_count})`, person.id));
+      });
+      const temporary = Array.from(personSelect.options).find((option) => option.dataset.temporary === 'true' && option.value === current);
+      if (temporary) options.push(temporary);
+      personSelect.replaceChildren(...options);
+      if (Array.from(personSelect.options).some((option) => option.value === current)) personSelect.value = current;
+      personFilterWrap.hidden = false;
+      faceSearchButton.hidden = false;
+    } catch (_) {
+      facesLoaded = false;
+    }
+  }
+
   async function loadGalleries() {
     const response = await fetch('/api/galleries', { headers: headers(), cache: 'no-store' });
     if (!response.ok) throw new Error('gallery list failed');
@@ -103,8 +136,11 @@
 
   async function refresh() {
     try {
-      if (!gallerySelect.value) await loadGalleries();
-      const query = new URLSearchParams({ gallery: gallerySelect.value, sort: sortSelect.value });
+      if (!gallerySelect.options.length) await loadGalleries();
+      const query = new URLSearchParams({ sort: sortSelect.value });
+      if (personSelect.value) query.set('person', personSelect.value);
+      else query.set('gallery', gallerySelect.value);
+      gallerySelect.disabled = Boolean(personSelect.value);
       const response = await fetch(`/api/media?${query}`, { headers: headers(), cache: 'no-store' });
       if (!response.ok) throw new Error('gallery request failed');
       items = (await response.json()).items;
@@ -176,9 +212,10 @@
   async function downloadZIP(ids = []) {
     const button = ids.length ? document.querySelector('#download-selection') : document.querySelector('#download-all');
     const label = button.textContent; button.disabled = true; button.textContent = 'ZIP wird erstellt …';
+    const requestedIDs = ids.length ? ids : (personSelect.value ? items.filter((item) => item.kind === 'image').map((item) => item.id) : []);
     try {
       const response = await fetch('/api/download/zip', {
-        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: gallerySelect.value, ids }),
+        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: personSelect.value ? '' : gallerySelect.value, ids: requestedIDs }),
       });
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Download fehlgeschlagen.'); }
       const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob());
@@ -205,6 +242,69 @@
     await downloadZIP(chosen.map((item) => item.id));
   }
 
+  function setFaceStatus(message, isError = false) {
+    faceSearchStatus.textContent = message;
+    faceSearchStatus.hidden = !message;
+    faceSearchStatus.classList.toggle('is-error', isError);
+  }
+
+  function showFaceSearch() {
+    faceSearchPanel.hidden = false;
+    setFaceStatus('');
+    faceSelfie.value = '';
+  }
+
+  function hideFaceSearch() {
+    faceSearchPanel.hidden = true;
+    setFaceStatus('');
+  }
+
+  async function searchSelfie(event) {
+    event.preventDefault();
+    const file = faceSelfie.files?.[0];
+    if (!file) return;
+    const submit = faceSearchForm.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'Gesicht wird gesucht …';
+    setFaceStatus('');
+    try {
+      const form = new FormData();
+      form.append('file', file, file.name || 'selfie.jpg');
+      const response = await fetch('/api/faces/search', {
+        method: 'POST',
+        headers: headers(),
+        body: form,
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Gesichtssuche fehlgeschlagen.');
+      if (!payload.found) {
+        setFaceStatus('Wir konnten dich in den indexierten Hochzeitsfotos noch nicht sicher finden. Probiere ein gut beleuchtetes Selfie von vorn.', true);
+        return;
+      }
+
+      let option = Array.from(personSelect.options).find((candidate) => candidate.value === payload.person_id);
+      if (!option) {
+        option = new Option('', payload.person_id);
+        option.dataset.temporary = 'true';
+        personSelect.append(option);
+      }
+      option.textContent = payload.name
+        ? `${payload.name} (${payload.photo_count})`
+        : `Meine Fotos (${payload.photo_count})`;
+      personSelect.value = payload.person_id;
+      personFilterWrap.hidden = false;
+      hideFaceSearch();
+      selected.clear();
+      await refresh();
+    } catch (error) {
+      setFaceStatus(error.message || 'Gesichtssuche fehlgeschlagen.', true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Meine Fotos finden';
+    }
+  }
+
   function beginSelection() { selecting = true; selected.clear(); menu.hidden = true; updateSelectionUI(); }
   function endSelection() { selecting = false; selected.clear(); updateSelectionUI(); render(); }
   menuButton.addEventListener('click', () => { menu.hidden = !menu.hidden; menuButton.setAttribute('aria-expanded', String(!menu.hidden)); });
@@ -214,7 +314,12 @@
   document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); render(); updateSelectionUI(); });
   document.querySelector('#cancel-selection').addEventListener('click', endSelection);
   document.querySelector('#download-selection').addEventListener('click', downloadSelection);
-  gallerySelect.addEventListener('change', () => { selected.clear(); refresh(); }); sortSelect.addEventListener('change', refresh);
+  gallerySelect.addEventListener('change', () => { selected.clear(); if (!personSelect.value) refresh(); });
+  personSelect.addEventListener('change', () => { selected.clear(); refresh(); });
+  sortSelect.addEventListener('change', refresh);
+  faceSearchButton.addEventListener('click', showFaceSearch);
+  faceSearchClose.addEventListener('click', hideFaceSearch);
+  faceSearchForm.addEventListener('submit', searchSelfie);
   lightboxClose.addEventListener('click', closeLightbox); lightboxPrev.addEventListener('click', () => move(-1)); lightboxNext.addEventListener('click', () => move(1));
   lightboxShare.addEventListener('click', shareCurrent); lightboxDownload.addEventListener('click', () => items[currentIndex] && downloadOriginal(items[currentIndex]));
   lightbox.addEventListener('click', (event) => { if (event.target === lightbox) closeLightbox(); });
@@ -231,5 +336,5 @@
     if (event.key === 'ArrowLeft') move(-1);
     if (event.key === 'ArrowRight') move(1);
   });
-  refresh().then(() => window.setInterval(refresh, 10000));
+  Promise.all([loadFaces(), refresh()]).then(() => window.setInterval(refresh, 10000));
 })();

@@ -17,6 +17,7 @@ type Config struct {
 	EventSubtitle     string
 	EventTimezone     string
 	SettingsPassword  string
+	FaceServiceURL    string
 	MaxUploadsPerHour int
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
@@ -33,6 +34,7 @@ func ConfigFromEnv() (Config, error) {
 		EventSubtitle:     envOr("EVENT_SUBTITLE", "Haltet eure schönsten Momente mit uns fest."),
 		EventTimezone:     envOr("EVENT_TIMEZONE", "Europe/Berlin"),
 		SettingsPassword:  strings.TrimSpace(os.Getenv("SETTINGS_PASSWORD")),
+		FaceServiceURL:    envOr("FACE_SERVICE_URL", "http://face-search:8090"),
 		MaxUploadsPerHour: 120,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       0,

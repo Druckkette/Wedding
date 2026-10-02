@@ -17,6 +17,9 @@
   const intervalSuccess = document.querySelector('#interval-success');
   const shuffleToggle = document.querySelector('#shuffle-toggle');
   const shuffleLabel = document.querySelector('#shuffle-label');
+  const faceAdminStats = document.querySelector('#face-admin-stats');
+  const faceAdminUnavailable = document.querySelector('#face-admin-unavailable');
+  const facePeopleGrid = document.querySelector('#face-people-grid');
   const filters = Array.from(document.querySelectorAll('[data-filter]'));
   const pendingCount = document.querySelector('#pending-count');
   const grid = document.querySelector('#moderation-grid');
@@ -142,9 +145,93 @@
   async function loadSettings() {
     try {
       applyState(await request('/api/settings'));
+      await loadFaceAdmin();
     } catch (error) {
       if (error.status === 401) showLogin();
       else showLogin(error.message);
+    }
+  }
+
+  async function loadFaceThumb(image, url) {
+    try {
+      const response = await fetch(url, { headers: { 'X-Upload-Token': token }, cache: 'no-store' });
+      if (!response.ok) return;
+      const objectURL = URL.createObjectURL(await response.blob());
+      image.src = objectURL;
+      image.addEventListener('load', () => URL.revokeObjectURL(objectURL), { once: true });
+    } catch (_) { /* thumbnail is optional */ }
+  }
+
+  function createFacePerson(person) {
+    const article = document.createElement('article');
+    article.className = 'face-person';
+
+    const portrait = document.createElement('div');
+    portrait.className = 'face-person-image';
+    const image = document.createElement('img');
+    image.alt = person.name ? `Gesicht von ${person.name}` : 'Erkannte Person';
+    image.loading = 'lazy';
+    portrait.append(image);
+    loadFaceThumb(image, person.thumbnail_url);
+
+    const info = document.createElement('div');
+    info.className = 'face-person-info';
+    const meta = document.createElement('small');
+    meta.textContent = `${person.photo_count} Fotos · ${person.face_count} erkannte Gesichter`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 80;
+    input.value = person.name || '';
+    input.placeholder = 'Name des Gastes';
+    input.setAttribute('aria-label', `Name für ${person.id}`);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = person.name ? 'Namen speichern' : 'Person benennen';
+    const status = document.createElement('span');
+    status.className = 'face-person-status';
+
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      status.textContent = '';
+      try {
+        await request('/api/faces/admin/name', {
+          method: 'POST',
+          body: JSON.stringify({ id: person.id, name: input.value.trim() }),
+        });
+        person.name = input.value.trim();
+        button.textContent = person.name ? 'Namen speichern' : 'Person benennen';
+        status.textContent = person.name ? 'Gespeichert' : 'Name entfernt';
+      } catch (error) {
+        if (error.status === 401) showLogin('Bitte erneut anmelden.');
+        else status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    info.append(meta, input, button, status);
+    article.append(portrait, info);
+    return article;
+  }
+
+  async function loadFaceAdmin() {
+    facePeopleGrid.replaceChildren();
+    faceAdminStats.hidden = true;
+    faceAdminUnavailable.hidden = true;
+    try {
+      const payload = await request('/api/faces/admin');
+      if (!payload.available) {
+        faceAdminUnavailable.hidden = false;
+        return;
+      }
+      const stats = payload.stats || {};
+      faceAdminStats.textContent = `${stats.people || 0} Personen · ${stats.faces || 0} Gesichter · ${stats.images || 0} Bilder`;
+      faceAdminStats.hidden = false;
+      (payload.people || []).forEach((person) => facePeopleGrid.append(createFacePerson(person)));
+    } catch (error) {
+      if (error.status === 401) throw error;
+      faceAdminUnavailable.textContent = error.message || 'Gesichtsindex konnte nicht geladen werden.';
+      faceAdminUnavailable.hidden = false;
     }
   }
 

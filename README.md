@@ -27,7 +27,10 @@ Eine kleine, für iOS und Android optimierte Web-App, über die Hochzeitsgäste 
 - Medienzugriff ausschließlich über den geheimen Event-Link
 - Serverseitige Typprüfung, Rate-Limit und atomisches Speichern
 - Metadaten als `uploads.jsonl` neben den Dateien
-- Unprivilegierter, schreibgeschützter Docker-Container
+- Lokale Gesichtserkennung: Personenfilter nach Namen und „Finde mich“-Suche per Selfie
+- Gesichtsindex wird auf dem Mac erzeugt und getrennt unter `.face-index` auf dem NAS gespeichert
+- Selfies werden nur im Arbeitsspeicher des lokalen NAS-Dienstes ausgewertet und nicht gespeichert
+- Unprivilegierte, schreibgeschützte Docker-Container
 
 ## Lokal starten
 
@@ -56,11 +59,67 @@ Im produktiven Einsatz gehört die App hinter einen HTTPS-Reverse-Proxy; der Con
 | `EVENT_SUBTITLE` | siehe `.env.example` | Einladungstext |
 | `EVENT_TIMEZONE` | `Europe/Berlin` | Zeitzone für EXIF-Aufnahmezeit und NAS-Dateidatum |
 | `MAX_UPLOADS_PER_HOUR` | `120` | Schutzlimit je IP-Adresse |
+| `FACE_MATCH_THRESHOLD` | `0.42` | Mindestähnlichkeit für „Finde mich“; höher = strenger |
 | `HOST_PORT` | `18787` | Nur lokal gebundener Reverse-Proxy-Port |
 | `NAS_UPLOAD_DIR` | `/volume1/photo/Hochzeit-Uploads` | Persistenter Zielordner auf dem NAS |
 | `PUID` / `PGID` | `1024` / `100` | DSM-Benutzer und -Gruppe für neue Dateien |
 
 Der Token wird bewusst nicht ins Repository eingecheckt. Wird der QR-Code weitergegeben oder verloren, genügt ein neuer Token in `.env` und `docker compose up -d --force-recreate`.
+
+## Gesichtserkennung einrichten
+
+Die rechenintensive Erstindexierung läuft auf einem Mac. Die Wedding-App auf dem NAS liest danach nur den erzeugten Index; einzelne Selfies werden von einem kleinen internen Docker-Dienst ausgewertet. Originalfotos werden dabei nicht verändert.
+
+### 1. NAS-Fotoordner am Mac mounten
+
+Den Ordner aus `NAS_UPLOAD_DIR` per SMB im Finder verbinden. Angenommen, er ist danach beispielsweise unter `/Volumes/Hochzeit-Uploads` erreichbar.
+
+### 2. Python-Umgebung auf dem Mac anlegen
+
+```sh
+cd Wedding
+python3 -m venv .venv-face
+source .venv-face/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r tools/face-indexer/requirements.txt
+```
+
+### 3. Gesichtsindex erzeugen
+
+```sh
+python tools/face-indexer/index_faces.py \
+  --photos "/Volumes/Hochzeit-Uploads"
+```
+
+Der Indexer lädt YuNet und SFace einmalig in `.face-index/models`, erkennt alle Gesichter, bildet lokale Personencluster und schreibt:
+
+```text
+.face-index/
+├── index.json
+├── names.json
+├── embeddings.npz
+├── models/
+└── thumbs/
+```
+
+`index.json`, `names.json` und `embeddings.npz` enthalten biometrische Zuordnungsdaten und gehören deshalb wie die Fotos selbst in das private Backup. Der versteckte Ordner wird von der normalen Galerie nicht als Fotoalbum erkannt.
+
+Wird der Indexer später erneut ausgeführt, versucht er bereits vergebene Namen anhand der bisherigen Embeddings auf die neuen Cluster zu übertragen. Für beste Ergebnisse das vollständige Fotoarchiv erneut indexieren.
+
+### 4. NAS-Container aktualisieren
+
+```sh
+docker compose up -d --build
+docker compose ps
+```
+
+`face-search` ist ausschließlich im internen Docker-Netz erreichbar. Es wird kein zusätzlicher Port nach außen veröffentlicht.
+
+### 5. Personen benennen
+
+Unter `/u/<UPLOAD_TOKEN>/settings` im Abschnitt **Gesichtserkennung** erscheinen die erkannten Personen mit einem Beispielgesicht. Namen lassen sich dort vergeben oder entfernen. Nur benannte Personen erscheinen im öffentlichen Personenfilter.
+
+Gäste können zusätzlich **Finde mich** verwenden. Das Selfie wird an `/api/faces/search` geschickt, lokal in ein SFace-Embedding umgewandelt, mit dem NAS-Index verglichen und danach verworfen. Ein Treffer funktioniert auch bei noch unbenannten Personen.
 
 ## Betrieb
 

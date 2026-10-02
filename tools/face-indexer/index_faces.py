@@ -374,15 +374,15 @@ def main() -> int:
     )
     parser.add_argument("--photos", required=True, type=Path, help="NAS-Hochzeitsordner")
     parser.add_argument("--index-dir", type=Path, help="Standard: <photos>/.face-index")
-    parser.add_argument("--cluster-threshold", type=float, default=0.37)
-    parser.add_argument("--detector-score", type=float, default=0.80)
+    parser.add_argument("--cluster-threshold", type=float, default=0.45)
+    parser.add_argument("--detector-score", type=float, default=0.65)
     parser.add_argument(
         "--min-photos",
         type=int,
         default=2,
         help="Mindestzahl unterschiedlicher Fotos pro Personencluster (Standard: 2)",
     )
-    parser.add_argument("--max-dimension", type=int, default=2200)
+    parser.add_argument("--max-dimension", type=int, default=3200)
     args = parser.parse_args()
 
     root = args.photos.expanduser().resolve()
@@ -524,7 +524,7 @@ def main() -> int:
             "detected_faces": detected_faces,
             "faces": len(records),
             "people": len(people),
-            "discarded_single_photo_clusters": discarded_clusters,
+            "discarded_below_min_photos_clusters": discarded_clusters,
             "failed_images": len(failed),
         },
         "people": people,

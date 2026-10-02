@@ -140,13 +140,49 @@ func (index *faceIndex) person(id string) (faceIndexPerson, bool) {
 	return faceIndexPerson{}, false
 }
 
-func (index *faceIndex) containsPerson(relative, personID string) bool {
+func faceNameKey(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
+}
+
+func (index *faceIndex) personGroupIDs(id string) map[string]bool {
+	person, ok := index.person(id)
+	if !ok {
+		return nil
+	}
+	ids := map[string]bool{id: true}
+	nameKey := faceNameKey(person.Name)
+	if nameKey == "" {
+		return ids
+	}
+	for _, candidate := range index.People {
+		if faceNameKey(candidate.Name) == nameKey {
+			ids[candidate.ID] = true
+		}
+	}
+	return ids
+}
+
+func (index *faceIndex) containsAnyPerson(relative string, personIDs map[string]bool) bool {
 	for _, id := range index.Media[filepath.ToSlash(relative)] {
-		if id == personID {
+		if personIDs[id] {
 			return true
 		}
 	}
 	return false
+}
+
+func (index *faceIndex) groupPhotoCount(id string) int {
+	personIDs := index.personGroupIDs(id)
+	if len(personIDs) == 0 {
+		return 0
+	}
+	count := 0
+	for relative := range index.Media {
+		if index.containsAnyPerson(relative, personIDs) {
+			count++
+		}
+	}
+	return count
 }
 
 func validFacePersonID(value string) bool {
@@ -179,7 +215,8 @@ func (s *Server) filterMediaByFaceQuery(w http.ResponseWriter, r *http.Request, 
 		writeJSONError(w, http.StatusServiceUnavailable, "Der Gesichtsindex konnte nicht geladen werden.")
 		return nil, false
 	}
-	if !index.hasPerson(personID) {
+	personIDs := index.personGroupIDs(personID)
+	if len(personIDs) == 0 {
 		writeJSONError(w, http.StatusNotFound, "Person wurde im Gesichtsindex nicht gefunden.")
 		return nil, false
 	}
@@ -187,7 +224,7 @@ func (s *Server) filterMediaByFaceQuery(w http.ResponseWriter, r *http.Request, 
 	filtered := make([]publicMedia, 0, len(items))
 	for _, item := range items {
 		relative, err := decodeMediaID(item.ID)
-		if err == nil && index.containsPerson(relative, personID) {
+		if err == nil && index.containsAnyPerson(relative, personIDs) {
 			filtered = append(filtered, item)
 		}
 	}
@@ -214,11 +251,21 @@ func (s *Server) handleFacePeople(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		PhotoCount int    `json:"photo_count"`
 	}
-	people := make([]guestPerson, 0)
+	grouped := make(map[string]guestPerson)
 	for _, person := range index.People {
-		if strings.TrimSpace(person.Name) != "" {
-			people = append(people, guestPerson{ID: person.ID, Name: person.Name, PhotoCount: person.PhotoCount})
+		nameKey := faceNameKey(person.Name)
+		if nameKey == "" {
+			continue
 		}
+		current, exists := grouped[nameKey]
+		if !exists || person.ID < current.ID {
+			grouped[nameKey] = guestPerson{ID: person.ID, Name: person.Name}
+		}
+	}
+	people := make([]guestPerson, 0, len(grouped))
+	for _, person := range grouped {
+		person.PhotoCount = index.groupPhotoCount(person.ID)
+		people = append(people, person)
 	}
 	sort.Slice(people, func(i, j int) bool {
 		return strings.ToLower(people[i].Name) < strings.ToLower(people[j].Name)
@@ -338,7 +385,7 @@ func (s *Server) handleFaceSearch(w http.ResponseWriter, r *http.Request) {
 		"found":       true,
 		"person_id":   result.PersonID,
 		"name":        person.Name,
-		"photo_count": person.PhotoCount,
+		"photo_count": index.groupPhotoCount(result.PersonID),
 		"similarity":  result.Similarity,
 	})
 }

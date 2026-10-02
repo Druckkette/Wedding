@@ -125,7 +125,7 @@ def healthz() -> dict[str, object]:
 @app.post("/search", response_model=SearchResult)
 async def search(file: UploadFile = File(...)) -> SearchResult:
     content_type = (file.content_type or "").lower()
-    if not content_type.startswith("image/"):
+    if content_type and not content_type.startswith("image/") and content_type != "application/octet-stream":
         raise HTTPException(status_code=415, detail="Es wird ein Bild benötigt.")
 
     payload = await file.read(MAX_SELFIE_BYTES + 1)

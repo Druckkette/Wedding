@@ -91,7 +91,19 @@ python tools/face-indexer/index_faces.py \
   --photos "/Volumes/Hochzeit-Uploads"
 ```
 
-Der Indexer lädt YuNet und SFace einmalig in `.face-index/models`, erkennt alle Gesichter, bildet lokale Personencluster und schreibt:
+Der Indexer lädt YuNet und SFace einmalig in `.face-index/models`, erkennt alle Gesichter, bildet lokale Personencluster und schreibt den Index. Standardmäßig werden Cluster erst übernommen, wenn dieselbe Person auf mindestens **2 unterschiedlichen Fotos** erkannt wurde. Das grobe Clustering verwendet standardmäßig `--cluster-threshold 0.37` und die Gesichtserkennung `--detector-score 0.80`.
+
+Optional lassen sich die Werte anpassen, zum Beispiel:
+
+```sh
+python tools/face-indexer/index_faces.py \\
+  --photos "/Volumes/Hochzeit-Uploads" \\
+  --min-photos 2 \\
+  --cluster-threshold 0.37 \\
+  --detector-score 0.80
+```
+
+Danach liegen die Dateien hier:
 
 ```text
 .face-index/

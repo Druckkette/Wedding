@@ -40,6 +40,9 @@ services:
     environment:
       FACE_INDEX_DIR: /data/uploads/.face-index
       FACE_MATCH_THRESHOLD: "${FACE_MATCH_THRESHOLD:-0.42}"
+      FACE_SELFIE_DETECTOR_SCORE: "${FACE_SELFIE_DETECTOR_SCORE:-0.65}"
+      FACE_SELFIE_FALLBACK_SCORE: "${FACE_SELFIE_FALLBACK_SCORE:-0.50}"
+      FACE_SELFIE_MAX_DIMENSION: "${FACE_SELFIE_MAX_DIMENSION:-3200}"
       FACE_MAX_SELFIE_BYTES: "8388608"
     volumes:
       - "${NAS_UPLOAD_DIR:-/volume1/photo/Hochzeit-Uploads}:/data/uploads:ro"

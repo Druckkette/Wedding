@@ -91,3 +91,20 @@
   .moderation-item { grid-template-columns: 110px 1fr; }
   .page-nav a { padding-inline: 9px; font-size: .68rem; }
 }
+
+.face-admin-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }
+.face-admin-heading > div:first-child { max-width: 700px; }
+.face-admin-heading > div:first-child > p:not(.settings-label) { margin: 9px 0 0; color: var(--muted); line-height: 1.55; }
+.face-admin-stats { flex: 0 0 auto; padding: 9px 11px; border-radius: 999px; background: var(--sage-light); color: var(--sage); font-size: .72rem; font-weight: 800; }
+.face-people-grid { display: grid; margin-top: 22px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.face-person { display: grid; min-width: 0; grid-template-columns: 92px minmax(0, 1fr); overflow: hidden; border: 1px solid rgba(102,121,101,.16); border-radius: 4px; background: white; }
+.face-person-image { min-height: 118px; background: #e6e2da; }
+.face-person-image img { display: block; width: 100%; height: 100%; min-height: 118px; object-fit: cover; }
+.face-person-info { display: grid; min-width: 0; padding: 12px; align-content: center; gap: 7px; }
+.face-person-info small { color: var(--muted); font-size: .67rem; line-height: 1.35; }
+.face-person-info input { min-width: 0; width: 100%; padding: 9px 10px; border: 1px solid #d8d7cf; border-radius: 3px; background: white; color: var(--ink); font: inherit; font-size: .82rem; }
+.face-person-info input:focus { outline: none; border-color: var(--sage); box-shadow: 0 0 0 3px rgba(102,121,101,.12); }
+.face-person-info button { min-height: 36px; padding: 7px 10px; border: 0; border-radius: 3px; background: var(--ink); color: white; font: inherit; font-size: .72rem; font-weight: 800; cursor: pointer; }
+.face-person-info button:disabled { opacity: .6; cursor: wait; }
+.face-person-status { min-height: 14px; color: var(--sage); font-size: .65rem; font-weight: 700; }
+@media (max-width: 640px) { .face-admin-heading { flex-direction: column; } .face-admin-stats { align-self: flex-start; } .face-people-grid { grid-template-columns: 1fr; } }

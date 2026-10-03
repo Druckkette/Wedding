@@ -19,6 +19,11 @@ EXPANSION_THRESHOLD = float(os.environ.get("FACE_EXPANSION_THRESHOLD", "0.28"))
 NEIGHBOR_THRESHOLD = float(os.environ.get("FACE_NEIGHBOR_THRESHOLD", "0.48"))
 SEED_WINDOW = float(os.environ.get("FACE_SEED_WINDOW", "0.06"))
 MAX_SEEDS = int(os.environ.get("FACE_MAX_SEEDS", "8"))
+MAX_EXPANSION_SEEDS = int(os.environ.get("FACE_MAX_EXPANSION_SEEDS", "64"))
+SECONDARY_NEIGHBOR_THRESHOLD = float(os.environ.get("FACE_SECONDARY_NEIGHBOR_THRESHOLD", "0.43"))
+SECONDARY_SUPPORT_THRESHOLD = float(os.environ.get("FACE_SECONDARY_SUPPORT_THRESHOLD", "0.39"))
+SECONDARY_MIN_SUPPORT = int(os.environ.get("FACE_SECONDARY_MIN_SUPPORT", "2"))
+SECONDARY_DIRECT_FLOOR = float(os.environ.get("FACE_SECONDARY_DIRECT_FLOOR", "0.14"))
 SELFIE_DETECTOR_SCORE = float(os.environ.get("FACE_SELFIE_DETECTOR_SCORE", "0.65"))
 SELFIE_FALLBACK_SCORE = float(os.environ.get("FACE_SELFIE_FALLBACK_SCORE", "0.50"))
 SELFIE_MAX_DIMENSION = int(os.environ.get("FACE_SELFIE_MAX_DIMENSION", "3200"))
@@ -237,6 +242,39 @@ async def search(file: UploadFile = File(...)) -> SearchResult:
         (neighbor_scores >= NEIGHBOR_THRESHOLD)
         & (direct_scores >= max(0.18, MATCH_THRESHOLD - 0.08))
     )
+
+    # The first pass is deliberately precise. Use those matched wedding faces
+    # as additional positive examples to recover profile views, distance and
+    # difficult lighting. Requiring support from multiple positives limits
+    # identity drift into another guest.
+    first_pass_indices = np.flatnonzero(match_mask)
+    if first_pass_indices.size:
+        ranked = first_pass_indices[np.argsort(direct_scores[first_pass_indices])[::-1]]
+        expansion_indices: list[int] = []
+        expansion_media: set[str] = set()
+        for index in ranked.tolist():
+            media = str(search_media[index])
+            if media in expansion_media:
+                continue
+            expansion_indices.append(index)
+            expansion_media.add(media)
+            if len(expansion_indices) >= MAX_EXPANSION_SEEDS:
+                break
+
+        expansion_embeddings = search_embeddings[np.asarray(expansion_indices, dtype=np.int32)]
+        expansion_matrix = search_embeddings @ expansion_embeddings.T
+        secondary_best = np.max(expansion_matrix, axis=1)
+        secondary_support = np.sum(
+            expansion_matrix >= SECONDARY_SUPPORT_THRESHOLD,
+            axis=1,
+        )
+        secondary_mask = (
+            (direct_scores >= SECONDARY_DIRECT_FLOOR)
+            & (secondary_best >= SECONDARY_NEIGHBOR_THRESHOLD)
+            & (secondary_support >= SECONDARY_MIN_SUPPORT)
+        )
+        match_mask = match_mask | secondary_mask
+        neighbor_scores = np.maximum(neighbor_scores, secondary_best)
 
     best_by_media: dict[str, float] = {}
     for media, direct, neighbor, matched in zip(

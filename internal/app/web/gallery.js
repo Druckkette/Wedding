@@ -181,7 +181,11 @@
         page_size: pageSizeSelect.value,
       });
       if (gallerySelect.value) query.set('gallery', gallerySelect.value);
-      if (personSelect.value) query.set('person', personSelect.value);
+      if (personSelect.value.startsWith('search:')) {
+        query.set('face_search', personSelect.value.slice('search:'.length));
+      } else if (personSelect.value) {
+        query.set('person', personSelect.value);
+      }
       const response = await fetch(`/api/media?${query}`, { headers: headers(), cache: 'no-store' });
       if (!response.ok) throw new Error('gallery request failed');
       const payload = await response.json();
@@ -339,16 +343,17 @@
         return;
       }
 
-      let option = Array.from(personSelect.options).find((candidate) => candidate.value === payload.person_id);
+      const searchValue = `search:${payload.search_id}`;
+      let option = Array.from(personSelect.options).find((candidate) => candidate.value === searchValue);
       if (!option) {
-        option = new Option('', payload.person_id);
+        option = new Option('', searchValue);
         option.dataset.temporary = 'true';
         personSelect.append(option);
       }
       option.textContent = payload.name
-        ? `${payload.name} (${payload.photo_count})`
+        ? `Selfie: ${payload.name} (${payload.photo_count})`
         : `Meine Fotos (${payload.photo_count})`;
-      personSelect.value = payload.person_id;
+      personSelect.value = searchValue;
       personFilterWrap.hidden = false;
       hideFaceSearch();
       currentPage = 1;

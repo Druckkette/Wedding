@@ -46,6 +46,8 @@ type Server struct {
 	faceIndexSize   int64
 	faceNamesModNS  int64
 	faceNamesSize   int64
+	faceSearchMu    sync.Mutex
+	faceSearches    map[string]faceSearchSession
 	captureLocation *time.Location
 	settings        *settingsStore
 	sessions        *sessionStore
@@ -141,6 +143,7 @@ func New(cfg Config) (http.Handler, error) {
 		faceLimiter:     newRateLimiter(30, 15*time.Minute),
 		writeGate:       make(chan struct{}, 4),
 		imageMetaCache:  make(map[string]cachedImageMetadata),
+		faceSearches:    make(map[string]faceSearchSession),
 		captureLocation: captureLocation,
 		settings:        settings,
 		sessions:        newSessionStore(),

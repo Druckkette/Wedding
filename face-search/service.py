@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2 as cv
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 INDEX_DIR = Path(os.environ.get("FACE_INDEX_DIR", "/data/uploads/.face-index"))
 MODEL_DIR = INDEX_DIR / "models"
@@ -36,7 +36,7 @@ class SearchResult(BaseModel):
     found: bool
     person_id: str | None = None
     similarity: float | None = None
-    matched_media: list[str] = []
+    matched_media: list[str] = Field(default_factory=list)
 
 
 def _models_ready() -> bool:

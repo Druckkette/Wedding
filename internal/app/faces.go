@@ -51,10 +51,16 @@ type faceNamesFile struct {
 }
 
 type faceServiceResult struct {
-	Found      bool    `json:"found"`
-	PersonID   string  `json:"person_id"`
-	Similarity float64 `json:"similarity"`
-	Detail     string  `json:"detail"`
+	Found        bool     `json:"found"`
+	PersonID     string   `json:"person_id"`
+	Similarity   float64  `json:"similarity"`
+	MatchedMedia []string `json:"matched_media"`
+	Detail       string   `json:"detail"`
+}
+
+type faceSearchSession struct {
+	Media     map[string]bool
+	ExpiresAt time.Time
 }
 
 func (s *Server) faceIndexPath(name string) string {
@@ -383,25 +389,88 @@ func (s *Server) handleFaceSearch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if !validFacePersonID(result.PersonID) {
-		writeJSONError(w, http.StatusServiceUnavailable, "Die Selfie-Suche hat einen ungültigen Treffer geliefert.")
+	if len(result.MatchedMedia) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":         true,
+			"found":      false,
+			"similarity": result.Similarity,
+		})
 		return
 	}
 
-	index, err := s.loadFaceIndex()
-	if err != nil || !index.hasPerson(result.PersonID) {
-		writeJSONError(w, http.StatusServiceUnavailable, "Der Treffer ist im aktuellen Gesichtsindex nicht verfügbar.")
+	searchID, photoCount, err := s.storeFaceSearch(result.MatchedMedia)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Selfie-Suche konnte nicht gespeichert werden.")
 		return
 	}
-	person, _ := index.person(result.PersonID)
+
+	name := ""
+	if validFacePersonID(result.PersonID) {
+		if index, loadErr := s.loadFaceIndex(); loadErr == nil && index.hasPerson(result.PersonID) {
+			if person, ok := index.person(result.PersonID); ok {
+				name = person.Name
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,
 		"found":       true,
-		"person_id":   index.groupRepresentativeID(result.PersonID),
-		"name":        person.Name,
-		"photo_count": index.groupPhotoCount(result.PersonID),
+		"search_id":   searchID,
+		"name":        name,
+		"photo_count": photoCount,
 		"similarity":  result.Similarity,
 	})
+}
+
+func (s *Server) storeFaceSearch(media []string) (string, int, error) {
+	searchID, err := randomHex(16)
+	if err != nil {
+		return "", 0, err
+	}
+	now := s.now()
+	mediaSet := make(map[string]bool, len(media))
+	for _, relative := range media {
+		relative = filepath.ToSlash(strings.TrimSpace(relative))
+		if relative != "" {
+			mediaSet[relative] = true
+		}
+	}
+
+	s.faceSearchMu.Lock()
+	defer s.faceSearchMu.Unlock()
+	for id, session := range s.faceSearches {
+		if now.After(session.ExpiresAt) {
+			delete(s.faceSearches, id)
+		}
+	}
+	s.faceSearches[searchID] = faceSearchSession{
+		Media:     mediaSet,
+		ExpiresAt: now.Add(30 * time.Minute),
+	}
+	return searchID, len(mediaSet), nil
+}
+
+func (s *Server) faceSearchMedia(searchID string) (map[string]bool, bool) {
+	if len(searchID) != 32 {
+		return nil, false
+	}
+	for _, char := range searchID {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return nil, false
+		}
+	}
+
+	now := s.now()
+	s.faceSearchMu.Lock()
+	defer s.faceSearchMu.Unlock()
+	session, ok := s.faceSearches[searchID]
+	if !ok || now.After(session.ExpiresAt) {
+		if ok {
+			delete(s.faceSearches, searchID)
+		}
+		return nil, false
+	}
+	return session.Media, true
 }
 
 func (s *Server) handleFaceAdmin(w http.ResponseWriter, r *http.Request) {

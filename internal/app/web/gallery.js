@@ -381,7 +381,11 @@
     });
   });
   document.querySelector('#select-download').addEventListener('click', beginSelection);
-  document.querySelector('#select-all').addEventListener('click', () => { selected = new Set(items.filter((item) => item.kind === 'image').map((item) => item.id)); render(); updateSelectionUI(); });
+  document.querySelector('#select-all').addEventListener('click', () => {
+    items.filter((item) => item.kind === 'image').forEach((item) => selected.add(item.id));
+    render();
+    updateSelectionUI();
+  });
   document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); render(); updateSelectionUI(); });
   document.querySelector('#cancel-selection').addEventListener('click', endSelection);
   document.querySelector('#download-selection').addEventListener('click', downloadSelection);

@@ -807,3 +807,36 @@ func uploadRequestWithFields(t *testing.T, filename string, content []byte, toke
 	req.Header.Set("X-Upload-Token", token)
 	return req
 }
+
+
+func TestGalleryPageSizeOptions(t *testing.T) {
+	handler, err := New(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	validReq := httptest.NewRequest(http.MethodGet, "/api/media?page=1&page_size=25", nil)
+	validReq.Header.Set("X-Upload-Token", testToken)
+	validRes := httptest.NewRecorder()
+	handler.ServeHTTP(validRes, validReq)
+	if validRes.Code != http.StatusOK {
+		t.Fatalf("page_size=25: got %d: %s", validRes.Code, validRes.Body.String())
+	}
+	var validPayload struct {
+		PageSize int `json:"page_size"`
+	}
+	if err := json.NewDecoder(validRes.Body).Decode(&validPayload); err != nil {
+		t.Fatal(err)
+	}
+	if validPayload.PageSize != 25 {
+		t.Fatalf("page_size=25 returned %d", validPayload.PageSize)
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodGet, "/api/media?page=1&page_size=20", nil)
+	invalidReq.Header.Set("X-Upload-Token", testToken)
+	invalidRes := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRes, invalidReq)
+	if invalidRes.Code != http.StatusBadRequest {
+		t.Fatalf("page_size=20: got %d, want %d", invalidRes.Code, http.StatusBadRequest)
+	}
+}

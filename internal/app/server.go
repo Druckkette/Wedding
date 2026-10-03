@@ -607,8 +607,8 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 	totalPages := 1
 	if rawPageSize := strings.TrimSpace(r.URL.Query().Get("page_size")); rawPageSize != "" {
 		parsed, err := strconv.Atoi(rawPageSize)
-		if err != nil || (parsed != 10 && parsed != 20 && parsed != 30 && parsed != 40 && parsed != 50) {
-			writeJSONError(w, http.StatusBadRequest, "Bilder pro Seite müssen 10, 20, 30, 40 oder 50 sein.")
+		if err != nil || (parsed != 10 && parsed != 25 && parsed != 50) {
+			writeJSONError(w, http.StatusBadRequest, "Bilder pro Seite müssen 10, 25 oder 50 sein.")
 			return
 		}
 		pageSize = parsed

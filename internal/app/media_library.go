@@ -464,7 +464,13 @@ func (s *Server) handleZIPDownload(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		entry, err := zw.Create(filepath.Base(path))
+		entryName := filepath.Base(path)
+		if request.Gallery == "" {
+			if relative, decodeErr := decodeMediaID(item.ID); decodeErr == nil {
+				entryName = filepath.ToSlash(relative)
+			}
+		}
+		entry, err := zw.Create(entryName)
 		if err == nil {
 			_, err = io.Copy(entry, file)
 		}

@@ -339,7 +339,9 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'Gesichtssuche fehlgeschlagen.');
       if (!payload.found) {
-        setFaceStatus('Wir konnten dich in den indexierten Hochzeitsfotos noch nicht sicher finden. Probiere ein gut beleuchtetes Selfie von vorn.', true);
+        const similarity = Number(payload.similarity);
+        const score = Number.isFinite(similarity) ? ` Beste Ähnlichkeit: ${similarity.toFixed(3)}.` : '';
+        setFaceStatus(`Wir konnten dich in den indexierten Hochzeitsfotos noch nicht sicher finden.${score}`, true);
         return;
       }
 

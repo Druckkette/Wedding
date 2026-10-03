@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -600,11 +601,51 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
+	totalItems := len(items)
+	page := 1
+	pageSize := 0
+	totalPages := 1
+	if rawPageSize := strings.TrimSpace(r.URL.Query().Get("page_size")); rawPageSize != "" {
+		parsed, err := strconv.Atoi(rawPageSize)
+		if err != nil || (parsed != 10 && parsed != 20 && parsed != 30 && parsed != 40 && parsed != 50) {
+			writeJSONError(w, http.StatusBadRequest, "Bilder pro Seite müssen 10, 20, 30, 40 oder 50 sein.")
+			return
+		}
+		pageSize = parsed
+		if rawPage := strings.TrimSpace(r.URL.Query().Get("page")); rawPage != "" {
+			if parsedPage, err := strconv.Atoi(rawPage); err == nil && parsedPage > 0 {
+				page = parsedPage
+			}
+		}
+		if totalItems > 0 {
+			totalPages = (totalItems + pageSize - 1) / pageSize
+			if page > totalPages {
+				page = totalPages
+			}
+		} else {
+			page = 1
+			totalPages = 1
+		}
+		start := (page - 1) * pageSize
+		if start > totalItems {
+			start = totalItems
+		}
+		end := start + pageSize
+		if end > totalItems {
+			end = totalItems
+		}
+		items = items[start:end]
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	settings := s.settings.snapshot()
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"items":                      items,
+		"page":                       page,
+		"page_size":                  pageSize,
+		"total_items":                totalItems,
+		"total_pages":                totalPages,
 		"slideshow_style":            settings.SlideshowStyle,
 		"slideshow_interval_seconds": settings.SlideshowIntervalSeconds,
 		"slideshow_shuffle":          settings.SlideshowShuffle,

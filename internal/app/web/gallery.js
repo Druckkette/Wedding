@@ -1,0 +1,440 @@
+(() => {
+  'use strict';
+  const token = document.querySelector('meta[name="upload-token"]').content;
+  const grid = document.querySelector('#gallery-grid');
+  const empty = document.querySelector('#gallery-empty');
+  const count = document.querySelector('#media-count');
+  const liveStatus = document.querySelector('#live-status');
+  const gallerySelect = document.querySelector('#gallery-select');
+  const sortSelect = document.querySelector('#sort-select');
+  const pageSizeSelect = document.querySelector('#page-size-select');
+  const pagination = document.querySelector('#gallery-pagination');
+  const pagePrev = document.querySelector('#page-prev');
+  const pageNext = document.querySelector('#page-next');
+  const pageLabel = document.querySelector('#page-label');
+  const refreshGallery = document.querySelector('#refresh-gallery');
+  const personFilterWrap = document.querySelector('#person-filter-wrap');
+  const personSelect = document.querySelector('#person-select');
+  const faceSearchButton = document.querySelector('#face-search-button');
+  const faceSearchPanel = document.querySelector('#face-search-panel');
+  const faceSearchClose = document.querySelector('#face-search-close');
+  const faceSearchForm = document.querySelector('#face-search-form');
+  const faceSelfie = document.querySelector('#face-selfie');
+  const faceSearchStatus = document.querySelector('#face-search-status');
+  const menuButton = document.querySelector('#download-menu-button');
+  const menu = document.querySelector('#download-menu');
+  const downloadAlbumButton = document.querySelector('#download-album');
+  const selectionBar = document.querySelector('#selection-bar');
+  const selectionCount = document.querySelector('#selection-count');
+  const lightbox = document.querySelector('#lightbox');
+  const lightboxMedia = document.querySelector('#lightbox-media');
+  const lightboxCaption = document.querySelector('#lightbox-caption');
+  const lightboxClose = document.querySelector('#lightbox-close');
+  const lightboxPrev = document.querySelector('#lightbox-prev');
+  const lightboxNext = document.querySelector('#lightbox-next');
+  const lightboxShare = document.querySelector('#lightbox-share');
+  const lightboxDownload = document.querySelector('#lightbox-download');
+  let items = [];
+  let currentIndex = -1;
+  let initialized = false;
+  let selecting = false;
+  let selected = new Set();
+  let touchStart = null;
+  let facesLoaded = false;
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalItems = 0;
+
+  const headers = (extra = {}) => ({ 'X-Upload-Token': token, ...extra });
+
+  function setLiveStatus(isOnline) {
+    liveStatus.classList.toggle('offline', !isOnline);
+    liveStatus.replaceChildren();
+    if (isOnline) {
+      const dot = document.createElement('i');
+      liveStatus.append(dot, document.createTextNode(' Aktuell'));
+    } else liveStatus.textContent = 'Verbindung wird wiederhergestellt …';
+  }
+
+  function mediaElement(item, full = false) {
+    const media = document.createElement(item.kind === 'video' ? 'video' : 'img');
+    media.src = item.url;
+    if (item.kind === 'video') {
+      media.muted = !full; media.playsInline = true; media.preload = full ? 'metadata' : 'none'; media.controls = full;
+    } else {
+      media.alt = item.is_challenge ? `Challenge: ${item.challenge}` : item.filename;
+      media.loading = full ? 'eager' : 'lazy'; media.decoding = 'async';
+    }
+    return media;
+  }
+
+  function updateSelectionUI() {
+    selectionBar.hidden = !selecting;
+    grid.classList.toggle('selection-mode', selecting);
+    selectionCount.textContent = `${selected.size} ${selected.size === 1 ? 'Foto ausgewählt' : 'Fotos ausgewählt'}`;
+  }
+
+  function cardFor(item, isNew) {
+    const card = document.createElement('button');
+    card.className = `gallery-card${isNew ? ' is-new' : ''}${item.is_challenge ? ' is-challenge' : ''}`;
+    card.type = 'button'; card.dataset.id = item.id;
+    card.setAttribute('aria-label', item.is_challenge ? `Challenge-Bild: ${item.challenge}` : `${item.filename} öffnen`);
+    card.append(mediaElement(item));
+    const check = document.createElement('span'); check.className = 'selection-check'; check.textContent = '✓'; card.append(check);
+    if (item.kind === 'video') {
+      const kind = document.createElement('span'); kind.className = 'media-kind'; kind.textContent = '▶ Video'; card.append(kind);
+    }
+    if (item.is_challenge) {
+      const badge = document.createElement('span'); badge.className = 'challenge-badge';
+      badge.textContent = `★ FOTO-CHALLENGE · ${item.challenge_by}`; card.append(badge);
+    }
+    card.addEventListener('click', () => {
+      if (selecting) {
+        if (item.kind !== 'image') return;
+        if (selected.has(item.id)) selected.delete(item.id); else selected.add(item.id);
+        card.classList.toggle('selected', selected.has(item.id)); updateSelectionUI();
+      } else openLightbox(items.findIndex((candidate) => candidate.id === item.id));
+    });
+    return card;
+  }
+
+  function render() {
+    const existing = new Map(Array.from(grid.children).map((card) => [card.dataset.id, card]));
+    grid.replaceChildren(...items.map((item) => {
+      const card = existing.get(item.id) || cardFor(item, initialized);
+      card.classList.toggle('selected', selected.has(item.id)); return card;
+    }));
+    initialized = true; empty.hidden = totalItems !== 0; grid.hidden = items.length === 0;
+
+    if (totalItems === 0) {
+      count.textContent = '0 Aufnahmen';
+    } else {
+      const pageSize = Number(pageSizeSelect.value || 25);
+      const start = (currentPage - 1) * pageSize + 1;
+      const end = start + items.length - 1;
+      count.textContent = `${start}–${end} von ${totalItems} Aufnahmen`;
+    }
+
+    pagination.hidden = totalPages <= 1;
+    pageLabel.textContent = `Seite ${currentPage} von ${totalPages}`;
+    pagePrev.disabled = currentPage <= 1;
+    pageNext.disabled = currentPage >= totalPages;
+  }
+
+  async function loadFaces() {
+    try {
+      const response = await fetch('/api/faces/people', { headers: headers(), cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      facesLoaded = Boolean(payload.available);
+      if (!facesLoaded) return;
+
+      const current = personSelect.value;
+      const options = [new Option('Alle Personen', '')];
+      (payload.people || []).forEach((person) => {
+        options.push(new Option(`${person.name} (${person.photo_count})`, person.id));
+      });
+      const temporary = Array.from(personSelect.options).find((option) => option.dataset.temporary === 'true' && option.value === current);
+      if (temporary) options.push(temporary);
+      personSelect.replaceChildren(...options);
+      if (Array.from(personSelect.options).some((option) => option.value === current)) personSelect.value = current;
+      personFilterWrap.hidden = false;
+      faceSearchButton.hidden = false;
+    } catch (_) {
+      facesLoaded = false;
+    }
+  }
+
+  async function loadGalleries() {
+    const response = await fetch('/api/galleries', { headers: headers(), cache: 'no-store' });
+    if (!response.ok) throw new Error('gallery list failed');
+    const payload = await response.json();
+    const previous = gallerySelect.value;
+    const total = (payload.galleries || []).reduce((sum, gallery) => sum + Number(gallery.count || 0), 0);
+    const options = [new Option(`Alle Bilder (${total})`, '')];
+    (payload.galleries || []).forEach((gallery) => {
+      options.push(new Option(`${gallery.name} (${gallery.count})`, gallery.name));
+    });
+    gallerySelect.replaceChildren(...options);
+    if (previous && payload.galleries.some((gallery) => gallery.name === previous)) {
+      gallerySelect.value = previous;
+    } else {
+      gallerySelect.value = '';
+    }
+    updateAlbumDownloadButton();
+  }
+
+  function updateAlbumDownloadButton() {
+    const album = gallerySelect.value;
+    downloadAlbumButton.disabled = !album;
+    downloadAlbumButton.textContent = album
+      ? `Album „${album}“ herunterladen`
+      : 'Album auswählen zum Herunterladen';
+  }
+
+  async function refresh() {
+    try {
+      if (!gallerySelect.options.length) await loadGalleries();
+      const query = new URLSearchParams({
+        sort: sortSelect.value,
+        page: String(currentPage),
+        page_size: pageSizeSelect.value,
+      });
+      if (gallerySelect.value) query.set('gallery', gallerySelect.value);
+      if (personSelect.value.startsWith('search:')) {
+        query.set('face_search', personSelect.value.slice('search:'.length));
+      } else if (personSelect.value) {
+        query.set('person', personSelect.value);
+      }
+      const response = await fetch(`/api/media?${query}`, { headers: headers(), cache: 'no-store' });
+      if (!response.ok) throw new Error('gallery request failed');
+      const payload = await response.json();
+      items = payload.items || [];
+      currentPage = Number(payload.page || 1);
+      totalPages = Math.max(1, Number(payload.total_pages || 1));
+      totalItems = Number(payload.total_items || 0);
+      render(); updateSelectionUI(); setLiveStatus(true);
+    } catch (_) { setLiveStatus(false); }
+  }
+
+  function resetPageAndRefresh() {
+    currentPage = 1;
+    selected.clear();
+    refresh();
+  }
+
+  function showCurrent() {
+    const item = items[currentIndex];
+    if (!item) return closeLightbox();
+    lightboxMedia.replaceChildren(mediaElement(item, true)); lightboxCaption.replaceChildren();
+    if (item.is_challenge) {
+      const title = document.createElement('strong'); title.textContent = `Challenge geschafft: ${item.challenge}`;
+      const by = document.createElement('span'); by.textContent = item.challenge_by; lightboxCaption.append(title, by);
+    } else {
+      const filename = document.createElement('span');
+      filename.textContent = item.captured_at ? `${item.filename} · aufgenommen ${new Date(item.captured_at).toLocaleString('de-DE')}` : item.filename;
+      lightboxCaption.append(filename);
+    }
+    lightboxPrev.disabled = currentIndex <= 0; lightboxNext.disabled = currentIndex >= items.length - 1;
+    lightboxShare.hidden = item.kind !== 'image';
+    [items[currentIndex - 1], items[currentIndex + 1]].forEach((candidate) => {
+      if (candidate?.kind === 'image') { const image = new Image(); image.src = candidate.url; }
+    });
+  }
+
+  function openLightbox(index) {
+    currentIndex = index; showCurrent(); lightbox.hidden = false; document.body.style.overflow = 'hidden';
+    lightboxClose.focus({ preventScroll: true });
+  }
+
+  function closeLightbox() {
+    const item = items[currentIndex];
+    lightbox.hidden = true; lightboxMedia.replaceChildren(); document.body.style.overflow = '';
+    if (item) document.querySelector(`[data-id="${CSS.escape(item.id)}"]`)?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function move(direction) {
+    const next = currentIndex + direction;
+    if (next < 0 || next >= items.length) return;
+    currentIndex = next; showCurrent();
+  }
+
+  async function originalFile(item) {
+    const response = await fetch(item.download_url, { headers: headers() });
+    if (!response.ok) throw new Error('Original konnte nicht geladen werden.');
+    return new File([await response.blob()], item.filename, { type: item.content_type });
+  }
+
+  async function shareCurrent() {
+    const item = items[currentIndex];
+    if (!item) return;
+    try {
+      const file = await originalFile(item);
+      if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: item.filename });
+      else downloadOriginal(item);
+    } catch (error) { if (error.name !== 'AbortError') window.alert(error.message || 'Teilen ist nicht verfügbar.'); }
+  }
+
+  async function downloadOriginal(item) {
+    try {
+      const file = await originalFile(item); const link = document.createElement('a');
+      link.href = URL.createObjectURL(file); link.download = item.filename; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+    } catch (error) { window.alert(error.message); }
+  }
+
+  async function downloadZIP({ ids = [], gallery = '', personID = '', filename = 'Hochzeitsfotos', button }) {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'ZIP wird erstellt …';
+    try {
+      const response = await fetch('/api/download/zip', {
+        method: 'POST',
+        headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ gallery, person_id: personID, ids }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Download fehlgeschlagen.');
+      }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = `${filename}.zip`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+      updateAlbumDownloadButton();
+    }
+  }
+
+  async function downloadSelection() {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    await downloadZIP({
+      ids,
+      gallery: gallerySelect.value,
+      filename: 'Ausgewaehlte-Hochzeitsfotos',
+      button: document.querySelector('#download-selection'),
+    });
+  }
+
+  function setFaceStatus(message, isError = false) {
+    faceSearchStatus.textContent = message;
+    faceSearchStatus.hidden = !message;
+    faceSearchStatus.classList.toggle('is-error', isError);
+  }
+
+  function showFaceSearch() {
+    faceSearchPanel.hidden = false;
+    setFaceStatus('');
+    faceSelfie.value = '';
+  }
+
+  function hideFaceSearch() {
+    faceSearchPanel.hidden = true;
+    setFaceStatus('');
+  }
+
+  async function searchSelfie(event) {
+    event.preventDefault();
+    const file = faceSelfie.files?.[0];
+    if (!file) return;
+    const submit = faceSearchForm.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'Gesicht wird gesucht …';
+    setFaceStatus('');
+    try {
+      const form = new FormData();
+      form.append('file', file, file.name || 'selfie.jpg');
+      const response = await fetch('/api/faces/search', {
+        method: 'POST',
+        headers: headers(),
+        body: form,
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Gesichtssuche fehlgeschlagen.');
+      if (!payload.found) {
+        const similarity = Number(payload.similarity);
+        const score = Number.isFinite(similarity) ? ` Beste Ähnlichkeit: ${similarity.toFixed(3)}.` : '';
+        setFaceStatus(`Wir konnten dich in den indexierten Hochzeitsfotos noch nicht sicher finden.${score}`, true);
+        return;
+      }
+
+      const searchValue = `search:${payload.search_id}`;
+      let option = Array.from(personSelect.options).find((candidate) => candidate.value === searchValue);
+      if (!option) {
+        option = new Option('', searchValue);
+        option.dataset.temporary = 'true';
+        personSelect.append(option);
+      }
+      option.textContent = payload.name
+        ? `Selfie: ${payload.name} (${payload.photo_count})`
+        : `Meine Fotos (${payload.photo_count})`;
+      personSelect.value = searchValue;
+      personFilterWrap.hidden = false;
+      hideFaceSearch();
+      currentPage = 1;
+      selected.clear();
+      await refresh();
+    } catch (error) {
+      setFaceStatus(error.message || 'Gesichtssuche fehlgeschlagen.', true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Meine Fotos finden';
+    }
+  }
+
+  function beginSelection() { selecting = true; selected.clear(); menu.hidden = true; updateSelectionUI(); }
+  function endSelection() { selecting = false; selected.clear(); updateSelectionUI(); render(); }
+  menuButton.addEventListener('click', () => { menu.hidden = !menu.hidden; menuButton.setAttribute('aria-expanded', String(!menu.hidden)); });
+  document.querySelector('#download-all').addEventListener('click', () => downloadZIP({
+    gallery: '',
+    personID: '',
+    filename: 'Hochzeitsfotos',
+    button: document.querySelector('#download-all'),
+  }));
+  downloadAlbumButton.addEventListener('click', () => {
+    if (!gallerySelect.value) return;
+    downloadZIP({
+      gallery: gallerySelect.value,
+      personID: '',
+      filename: gallerySelect.value,
+      button: downloadAlbumButton,
+    });
+  });
+  document.querySelector('#select-download').addEventListener('click', beginSelection);
+  document.querySelector('#select-all').addEventListener('click', () => {
+    items.filter((item) => item.kind === 'image').forEach((item) => selected.add(item.id));
+    render();
+    updateSelectionUI();
+  });
+  document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); render(); updateSelectionUI(); });
+  document.querySelector('#cancel-selection').addEventListener('click', endSelection);
+  document.querySelector('#download-selection').addEventListener('click', downloadSelection);
+  gallerySelect.addEventListener('change', () => {
+    updateAlbumDownloadButton();
+    resetPageAndRefresh();
+  });
+  personSelect.addEventListener('change', resetPageAndRefresh);
+  sortSelect.addEventListener('change', resetPageAndRefresh);
+  pageSizeSelect.addEventListener('change', resetPageAndRefresh);
+  pagePrev.addEventListener('click', async () => {
+    if (currentPage <= 1) return;
+    currentPage -= 1;
+    await refresh();
+    count.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  pageNext.addEventListener('click', async () => {
+    if (currentPage >= totalPages) return;
+    currentPage += 1;
+    await refresh();
+    count.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  refreshGallery.addEventListener('click', refresh);
+  faceSearchButton.addEventListener('click', showFaceSearch);
+  faceSearchClose.addEventListener('click', hideFaceSearch);
+  faceSearchForm.addEventListener('submit', searchSelfie);
+  lightboxClose.addEventListener('click', closeLightbox); lightboxPrev.addEventListener('click', () => move(-1)); lightboxNext.addEventListener('click', () => move(1));
+  lightboxShare.addEventListener('click', shareCurrent); lightboxDownload.addEventListener('click', () => items[currentIndex] && downloadOriginal(items[currentIndex]));
+  lightbox.addEventListener('click', (event) => { if (event.target === lightbox) closeLightbox(); });
+  lightbox.addEventListener('pointerdown', (event) => { if (event.pointerType !== 'mouse') touchStart = { x: event.clientX, y: event.clientY, at: Date.now() }; });
+  lightbox.addEventListener('pointerup', (event) => {
+    if (!touchStart) return;
+    const dx = event.clientX - touchStart.x, dy = event.clientY - touchStart.y;
+    if (Math.abs(dx) >= 55 && Math.abs(dx) > Math.abs(dy) * 1.35 && Date.now() - touchStart.at < 900) move(dx < 0 ? 1 : -1);
+    touchStart = null;
+  });
+  document.addEventListener('keydown', (event) => {
+    if (lightbox.hidden) return;
+    if (event.key === 'Escape') closeLightbox();
+    if (event.key === 'ArrowLeft') move(-1);
+    if (event.key === 'ArrowRight') move(1);
+  });
+  loadFaces();
+  refresh();
+})();

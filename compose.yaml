@@ -1,0 +1,70 @@
+services:
+  wedding-upload:
+    build:
+      context: .
+    image: wedding-upload:local
+    container_name: wedding-upload
+    restart: unless-stopped
+    user: "${PUID:-1024}:${PGID:-100}"
+    env_file:
+      - .env
+    environment:
+      LISTEN_ADDR: ":8080"
+      UPLOAD_DIR: /data/uploads
+      FACE_SERVICE_URL: http://face-search:8090
+    ports:
+      - "127.0.0.1:${HOST_PORT:-18787}:8080"
+    volumes:
+      - "${NAS_UPLOAD_DIR:-/volume1/photo/Hochzeit-Uploads}:/data/uploads"
+    healthcheck:
+      test: ["CMD", "/wedding-upload", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+
+  face-search:
+    build:
+      context: ./face-search
+    image: wedding-face-search:local
+    container_name: wedding-face-search
+    restart: unless-stopped
+    user: "${PUID:-1024}:${PGID:-100}"
+    environment:
+      FACE_INDEX_DIR: /data/uploads/.face-index
+      FACE_MATCH_THRESHOLD: "${FACE_MATCH_THRESHOLD:-0.28}"
+      FACE_EXPANSION_THRESHOLD: "${FACE_EXPANSION_THRESHOLD:-0.28}"
+      FACE_NEIGHBOR_THRESHOLD: "${FACE_NEIGHBOR_THRESHOLD:-0.48}"
+      FACE_SEED_WINDOW: "${FACE_SEED_WINDOW:-0.06}"
+      FACE_MAX_SEEDS: "${FACE_MAX_SEEDS:-8}"
+      FACE_MAX_EXPANSION_SEEDS: "${FACE_MAX_EXPANSION_SEEDS:-32}"
+      FACE_SECONDARY_NEIGHBOR_THRESHOLD: "${FACE_SECONDARY_NEIGHBOR_THRESHOLD:-0.52}"
+      FACE_SECONDARY_SUPPORT_THRESHOLD: "${FACE_SECONDARY_SUPPORT_THRESHOLD:-0.46}"
+      FACE_SECONDARY_MIN_SUPPORT: "${FACE_SECONDARY_MIN_SUPPORT:-3}"
+      FACE_SECONDARY_DIRECT_FLOOR: "${FACE_SECONDARY_DIRECT_FLOOR:-0.20}"
+      FACE_SELFIE_DETECTOR_SCORE: "${FACE_SELFIE_DETECTOR_SCORE:-0.65}"
+      FACE_SELFIE_FALLBACK_SCORE: "${FACE_SELFIE_FALLBACK_SCORE:-0.50}"
+      FACE_SELFIE_MAX_DIMENSION: "${FACE_SELFIE_MAX_DIMENSION:-3200}"
+      FACE_MAX_SELFIE_BYTES: "8388608"
+    volumes:
+      - "${NAS_UPLOAD_DIR:-/volume1/photo/Hochzeit-Uploads}:/data/uploads:ro"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL

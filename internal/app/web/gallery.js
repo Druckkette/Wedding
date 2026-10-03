@@ -253,10 +253,10 @@
   async function downloadZIP(ids = []) {
     const button = ids.length ? document.querySelector('#download-selection') : document.querySelector('#download-all');
     const label = button.textContent; button.disabled = true; button.textContent = 'ZIP wird erstellt …';
-    const requestedIDs = ids.length ? ids : (personSelect.value ? items.filter((item) => item.kind === 'image').map((item) => item.id) : []);
+    const requestedIDs = ids.length ? ids : [];
     try {
       const response = await fetch('/api/download/zip', {
-        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: gallerySelect.value, ids: requestedIDs }),
+        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: gallerySelect.value, person_id: personSelect.value, ids: requestedIDs }),
       });
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Download fehlgeschlagen.'); }
       const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob());

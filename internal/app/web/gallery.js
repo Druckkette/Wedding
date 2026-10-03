@@ -7,6 +7,12 @@
   const liveStatus = document.querySelector('#live-status');
   const gallerySelect = document.querySelector('#gallery-select');
   const sortSelect = document.querySelector('#sort-select');
+  const pageSizeSelect = document.querySelector('#page-size-select');
+  const pagination = document.querySelector('#gallery-pagination');
+  const pagePrev = document.querySelector('#page-prev');
+  const pageNext = document.querySelector('#page-next');
+  const pageLabel = document.querySelector('#page-label');
+  const refreshGallery = document.querySelector('#refresh-gallery');
   const personFilterWrap = document.querySelector('#person-filter-wrap');
   const personSelect = document.querySelector('#person-select');
   const faceSearchButton = document.querySelector('#face-search-button');
@@ -34,6 +40,9 @@
   let selected = new Set();
   let touchStart = null;
   let facesLoaded = false;
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalItems = 0;
 
   const headers = (extra = {}) => ({ 'X-Upload-Token': token, ...extra });
 
@@ -42,7 +51,7 @@
     liveStatus.replaceChildren();
     if (isOnline) {
       const dot = document.createElement('i');
-      liveStatus.append(dot, document.createTextNode(' Live'));
+      liveStatus.append(dot, document.createTextNode(' Aktuell'));
     } else liveStatus.textContent = 'Verbindung wird wiederhergestellt …';
   }
 
@@ -94,8 +103,21 @@
       const card = existing.get(item.id) || cardFor(item, initialized);
       card.classList.toggle('selected', selected.has(item.id)); return card;
     }));
-    initialized = true; empty.hidden = items.length !== 0; grid.hidden = items.length === 0;
-    count.textContent = `${items.length} ${items.length === 1 ? 'Aufnahme' : 'Aufnahmen'}`;
+    initialized = true; empty.hidden = totalItems !== 0; grid.hidden = items.length === 0;
+
+    if (totalItems === 0) {
+      count.textContent = '0 Aufnahmen';
+    } else {
+      const pageSize = Number(pageSizeSelect.value || 20);
+      const start = (currentPage - 1) * pageSize + 1;
+      const end = start + items.length - 1;
+      count.textContent = `${start}–${end} von ${totalItems} Aufnahmen`;
+    }
+
+    pagination.hidden = totalPages <= 1;
+    pageLabel.textContent = `Seite ${currentPage} von ${totalPages}`;
+    pagePrev.disabled = currentPage <= 1;
+    pageNext.disabled = currentPage >= totalPages;
   }
 
   async function loadFaces() {
@@ -143,15 +165,29 @@
   async function refresh() {
     try {
       if (!gallerySelect.options.length) await loadGalleries();
-      const query = new URLSearchParams({ sort: sortSelect.value });
+      const query = new URLSearchParams({
+        sort: sortSelect.value,
+        page: String(currentPage),
+        page_size: pageSizeSelect.value,
+      });
       if (gallerySelect.value) query.set('gallery', gallerySelect.value);
       if (personSelect.value) query.set('person', personSelect.value);
       const response = await fetch(`/api/media?${query}`, { headers: headers(), cache: 'no-store' });
       if (!response.ok) throw new Error('gallery request failed');
-      items = (await response.json()).items;
+      const payload = await response.json();
+      items = payload.items || [];
+      currentPage = Number(payload.page || 1);
+      totalPages = Math.max(1, Number(payload.total_pages || 1));
+      totalItems = Number(payload.total_items || 0);
       selected = new Set(Array.from(selected).filter((id) => items.some((item) => item.id === id)));
       render(); updateSelectionUI(); setLiveStatus(true);
     } catch (_) { setLiveStatus(false); }
+  }
+
+  function resetPageAndRefresh() {
+    currentPage = 1;
+    selected.clear();
+    refresh();
   }
 
   function showCurrent() {
@@ -300,6 +336,7 @@
       personSelect.value = payload.person_id;
       personFilterWrap.hidden = false;
       hideFaceSearch();
+      currentPage = 1;
       selected.clear();
       await refresh();
     } catch (error) {
@@ -319,9 +356,25 @@
   document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); render(); updateSelectionUI(); });
   document.querySelector('#cancel-selection').addEventListener('click', endSelection);
   document.querySelector('#download-selection').addEventListener('click', downloadSelection);
-  gallerySelect.addEventListener('change', () => { selected.clear(); refresh(); });
-  personSelect.addEventListener('change', () => { selected.clear(); refresh(); });
-  sortSelect.addEventListener('change', refresh);
+  gallerySelect.addEventListener('change', resetPageAndRefresh);
+  personSelect.addEventListener('change', resetPageAndRefresh);
+  sortSelect.addEventListener('change', resetPageAndRefresh);
+  pageSizeSelect.addEventListener('change', resetPageAndRefresh);
+  pagePrev.addEventListener('click', async () => {
+    if (currentPage <= 1) return;
+    currentPage -= 1;
+    selected.clear();
+    await refresh();
+    count.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  pageNext.addEventListener('click', async () => {
+    if (currentPage >= totalPages) return;
+    currentPage += 1;
+    selected.clear();
+    await refresh();
+    count.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  refreshGallery.addEventListener('click', refresh);
   faceSearchButton.addEventListener('click', showFaceSearch);
   faceSearchClose.addEventListener('click', hideFaceSearch);
   faceSearchForm.addEventListener('submit', searchSelfie);
@@ -341,5 +394,6 @@
     if (event.key === 'ArrowLeft') move(-1);
     if (event.key === 'ArrowRight') move(1);
   });
-  Promise.all([loadFaces(), refresh()]).then(() => window.setInterval(refresh, 10000));
+  loadFaces();
+  refresh();
 })();

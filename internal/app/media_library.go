@@ -399,8 +399,9 @@ func (s *Server) handleZIPDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Gallery string   `json:"gallery"`
-		IDs     []string `json:"ids"`
+		Gallery  string   `json:"gallery"`
+		PersonID string   `json:"person_id"`
+		IDs      []string `json:"ids"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Auswahl konnte nicht gelesen werden.")
@@ -410,6 +411,30 @@ func (s *Server) handleZIPDownload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "Galerie ist gerade nicht erreichbar.")
 		return
+	}
+	if request.PersonID != "" {
+		if !validFacePersonID(request.PersonID) {
+			writeJSONError(w, http.StatusBadRequest, "Ungültiger Personenfilter.")
+			return
+		}
+		index, err := s.loadFaceIndex()
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "Der Gesichtsindex konnte nicht geladen werden.")
+			return
+		}
+		personIDs := index.personGroupIDs(request.PersonID)
+		if len(personIDs) == 0 {
+			writeJSONError(w, http.StatusNotFound, "Person wurde im Gesichtsindex nicht gefunden.")
+			return
+		}
+		filtered := make([]publicMedia, 0, len(all))
+		for _, item := range all {
+			relative, err := decodeMediaID(item.ID)
+			if err == nil && index.containsAnyPerson(relative, personIDs) {
+				filtered = append(filtered, item)
+			}
+		}
+		all = filtered
 	}
 	selected := make(map[string]bool, len(request.IDs))
 	for _, id := range request.IDs {

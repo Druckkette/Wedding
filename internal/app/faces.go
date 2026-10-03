@@ -218,6 +218,23 @@ func validFacePersonID(value string) bool {
 }
 
 func (s *Server) filterMediaByFaceQuery(w http.ResponseWriter, r *http.Request, items []publicMedia) ([]publicMedia, bool) {
+	searchID := strings.TrimSpace(r.URL.Query().Get("face_search"))
+	if searchID != "" {
+		mediaSet, ok := s.faceSearchMedia(searchID)
+		if !ok {
+			writeJSONError(w, http.StatusNotFound, "Die Selfie-Suche ist abgelaufen. Bitte erneut suchen.")
+			return nil, false
+		}
+		filtered := make([]publicMedia, 0, len(items))
+		for _, item := range items {
+			relative, err := decodeMediaID(item.ID)
+			if err == nil && mediaSet[filepath.ToSlash(relative)] {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered, true
+	}
+
 	personID := strings.TrimSpace(r.URL.Query().Get("person"))
 	if personID == "" {
 		return items, true

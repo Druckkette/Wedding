@@ -111,7 +111,15 @@ def _load_index() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         return embeddings, people, search_embeddings, search_media
 
 
-def _embedding_from_bytes(payload: bytes) -> np.ndarray:
+def _normalize_feature(feature: np.ndarray) -> np.ndarray:
+    vector = feature.reshape(-1).astype(np.float32)
+    norm = float(np.linalg.norm(vector))
+    if norm <= 1e-12:
+        raise ValueError("Das Gesicht konnte nicht ausgewertet werden.")
+    return vector / norm
+
+
+def _embeddings_from_bytes(payload: bytes) -> np.ndarray:
     image = cv.imdecode(np.frombuffer(payload, dtype=np.uint8), cv.IMREAD_COLOR)
     if image is None or image.size == 0:
         raise ValueError("Das Selfie konnte nicht gelesen werden.")
@@ -134,36 +142,39 @@ def _embedding_from_bytes(payload: bytes) -> np.ndarray:
 
     with _engine_lock:
         detector, recognizer = _get_engine()
-        detected_image = None
-        detected_faces = None
+        best_candidate = None
+        best_face = None
+        best_quality = -1.0
 
-        for score in (SELFIE_DETECTOR_SCORE, SELFIE_FALLBACK_SCORE):
-            detector.setScoreThreshold(score)
+        for score_threshold in (SELFIE_DETECTOR_SCORE, SELFIE_FALLBACK_SCORE):
+            detector.setScoreThreshold(score_threshold)
             for candidate in candidates:
                 candidate_height, candidate_width = candidate.shape[:2]
                 detector.setInputSize((candidate_width, candidate_height))
                 _, faces = detector.detect(candidate)
-                if faces is not None and len(faces) > 0:
-                    detected_image = candidate
-                    detected_faces = faces
-                    break
-            if detected_faces is not None:
+                if faces is None:
+                    continue
+                for face in faces:
+                    area = float(face[2] * face[3])
+                    confidence = float(face[-1])
+                    quality = area * max(confidence, 0.01)
+                    if quality > best_quality:
+                        best_quality = quality
+                        best_candidate = candidate
+                        best_face = face
+            if best_face is not None:
                 break
 
         detector.setScoreThreshold(SELFIE_DETECTOR_SCORE)
 
-        if detected_image is None or detected_faces is None:
+        if best_candidate is None or best_face is None:
             raise ValueError("Auf dem Selfie wurde kein Gesicht erkannt.")
 
-        face = max(detected_faces, key=lambda row: float(row[2] * row[3]))
-        aligned = recognizer.alignCrop(detected_image, face)
-        feature = recognizer.feature(aligned).reshape(-1).astype(np.float32)
+        aligned = recognizer.alignCrop(best_candidate, best_face)
+        variants = [aligned, cv.flip(aligned, 1)]
+        features = [_normalize_feature(recognizer.feature(variant)) for variant in variants]
 
-    norm = float(np.linalg.norm(feature))
-    if norm <= 1e-12:
-        raise ValueError("Das Gesicht konnte nicht ausgewertet werden.")
-    return feature / norm
-
+    return np.stack(features).astype(np.float32)
 
 @app.get("/healthz")
 def healthz() -> dict[str, object]:

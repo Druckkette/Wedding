@@ -33,6 +33,13 @@
 		  <option value="captured_asc">Aufnahmezeit · Älteste zuerst</option>
 		  <option value="name_asc">Dateiname · A–Z</option>
 		</select></label>
+		<label>Bilder pro Seite<select id="page-size-select" aria-label="Bilder pro Seite">
+		  <option value="10">10</option>
+		  <option value="20" selected>20</option>
+		  <option value="30">30</option>
+		  <option value="40">40</option>
+		  <option value="50">50</option>
+		</select></label>
 		<button class="face-search-button" id="face-search-button" type="button" hidden>⌾ Finde mich</button>
 		<div class="download-menu">
 		  <button id="download-menu-button" type="button" aria-expanded="false">Herunterladen</button>
@@ -63,9 +70,17 @@
 	  </div>
       <div class="gallery-status">
         <strong id="media-count">Galerie wird geladen …</strong>
-        <span id="live-status"><i></i> Live</span>
+        <div class="gallery-status-actions">
+          <span id="live-status"><i></i> Aktuell</span>
+          <button id="refresh-gallery" type="button">Aktualisieren</button>
+        </div>
       </div>
       <div class="gallery-grid" id="gallery-grid"></div>
+      <nav class="gallery-pagination" id="gallery-pagination" aria-label="Galerieseiten" hidden>
+        <button id="page-prev" type="button">← Zurück</button>
+        <span id="page-label">Seite 1 von 1</span>
+        <button id="page-next" type="button">Weiter →</button>
+      </nav>
       <div class="gallery-empty" id="gallery-empty" hidden>
         <span>♡</span>
         <h2>Noch ganz still hier</h2>

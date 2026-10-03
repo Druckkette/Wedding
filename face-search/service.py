@@ -196,7 +196,7 @@ async def search(file: UploadFile = File(...)) -> SearchResult:
         raise HTTPException(status_code=413, detail="Das Selfie ist zu groß.")
 
     try:
-        query = _embedding_from_bytes(payload)
+        queries = _embeddings_from_bytes(payload)
         embeddings, person_ids, search_embeddings, search_media = _load_index()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -206,25 +206,61 @@ async def search(file: UploadFile = File(...)) -> SearchResult:
     if search_embeddings.shape[0] == 0:
         return SearchResult(found=False)
 
-    search_scores = search_embeddings @ query
-    similarity = float(np.max(search_scores))
+    direct_matrix = search_embeddings @ queries.T
+    direct_scores = np.max(direct_matrix, axis=1)
+    similarity = float(np.max(direct_scores))
     if similarity < MATCH_THRESHOLD:
         return SearchResult(found=False, similarity=similarity)
 
+    seed_floor = max(MATCH_THRESHOLD, similarity - SEED_WINDOW)
+    order = np.argsort(direct_scores)[::-1]
+    seed_indices: list[int] = []
+    seed_media: set[str] = set()
+    for index in order.tolist():
+        if float(direct_scores[index]) < seed_floor:
+            break
+        media = str(search_media[index])
+        if media in seed_media:
+            continue
+        seed_indices.append(index)
+        seed_media.add(media)
+        if len(seed_indices) >= MAX_SEEDS:
+            break
+
+    neighbor_scores = np.zeros_like(direct_scores)
+    if seed_indices:
+        seed_embeddings = search_embeddings[np.asarray(seed_indices, dtype=np.int32)]
+        neighbor_scores = np.max(search_embeddings @ seed_embeddings.T, axis=1)
+
+    adaptive_floor = max(EXPANSION_THRESHOLD, similarity - 0.16)
+    match_mask = (direct_scores >= adaptive_floor) | (
+        (neighbor_scores >= NEIGHBOR_THRESHOLD)
+        & (direct_scores >= max(0.18, MATCH_THRESHOLD - 0.08))
+    )
+
     best_by_media: dict[str, float] = {}
-    for media, score in zip(search_media.tolist(), search_scores.tolist()):
+    for media, direct, neighbor, matched in zip(
+        search_media.tolist(),
+        direct_scores.tolist(),
+        neighbor_scores.tolist(),
+        match_mask.tolist(),
+    ):
+        if not matched:
+            continue
+        score = max(float(direct), float(neighbor))
         current = best_by_media.get(media)
         if current is None or score > current:
-            best_by_media[media] = float(score)
+            best_by_media[media] = score
+
     matched_media = [
         media
-        for media, score in sorted(best_by_media.items(), key=lambda item: item[1], reverse=True)
-        if score >= EXPANSION_THRESHOLD
+        for media, _ in sorted(best_by_media.items(), key=lambda item: item[1], reverse=True)
     ]
 
     person_id: str | None = None
     if embeddings.shape[0] > 0:
-        scores = embeddings @ query
+        person_matrix = embeddings @ queries.T
+        scores = np.max(person_matrix, axis=1)
         best_by_person: dict[str, float] = {}
         for candidate_id, score in zip(person_ids.tolist(), scores.tolist()):
             current = best_by_person.get(candidate_id)

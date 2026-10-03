@@ -437,6 +437,8 @@ def main() -> int:
 
     detected_faces = len(records)
     embeddings = np.stack([record.embedding for record in records]).astype(np.float32)
+    search_embeddings = embeddings.copy()
+    search_media = np.asarray([record.media for record in records], dtype="<U1024")
     assignments = greedy_clusters(embeddings, args.cluster_threshold)
 
     cluster_photos: dict[int, set[str]] = defaultdict(set)
@@ -540,6 +542,8 @@ def main() -> int:
         embeddings=embeddings,
         media=media,
         person_ids=person_ids,
+        search_embeddings=search_embeddings,
+        search_media=search_media,
     )
 
     if failed:

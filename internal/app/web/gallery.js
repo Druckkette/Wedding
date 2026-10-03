@@ -23,6 +23,7 @@
   const faceSearchStatus = document.querySelector('#face-search-status');
   const menuButton = document.querySelector('#download-menu-button');
   const menu = document.querySelector('#download-menu');
+  const downloadAlbumButton = document.querySelector('#download-album');
   const selectionBar = document.querySelector('#selection-bar');
   const selectionCount = document.querySelector('#selection-count');
   const lightbox = document.querySelector('#lightbox');
@@ -108,7 +109,7 @@
     if (totalItems === 0) {
       count.textContent = '0 Aufnahmen';
     } else {
-      const pageSize = Number(pageSizeSelect.value || 20);
+      const pageSize = Number(pageSizeSelect.value || 25);
       const start = (currentPage - 1) * pageSize + 1;
       const end = start + items.length - 1;
       count.textContent = `${start}–${end} von ${totalItems} Aufnahmen`;
@@ -160,6 +161,15 @@
     } else {
       gallerySelect.value = '';
     }
+    updateAlbumDownloadButton();
+  }
+
+  function updateAlbumDownloadButton() {
+    const album = gallerySelect.value;
+    downloadAlbumButton.disabled = !album;
+    downloadAlbumButton.textContent = album
+      ? `Album „${album}“ herunterladen`
+      : 'Album auswählen zum Herunterladen';
   }
 
   async function refresh() {
@@ -179,7 +189,6 @@
       currentPage = Number(payload.page || 1);
       totalPages = Math.max(1, Number(payload.total_pages || 1));
       totalItems = Number(payload.total_items || 0);
-      selected = new Set(Array.from(selected).filter((id) => items.some((item) => item.id === id)));
       render(); updateSelectionUI(); setLiveStatus(true);
     } catch (_) { setLiveStatus(false); }
   }
@@ -250,37 +259,43 @@
     } catch (error) { window.alert(error.message); }
   }
 
-  async function downloadZIP(ids = []) {
-    const button = ids.length ? document.querySelector('#download-selection') : document.querySelector('#download-all');
-    const label = button.textContent; button.disabled = true; button.textContent = 'ZIP wird erstellt …';
-    const requestedIDs = ids.length ? ids : [];
+  async function downloadZIP({ ids = [], gallery = '', personID = '', filename = 'Hochzeitsfotos', button }) {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'ZIP wird erstellt …';
     try {
       const response = await fetch('/api/download/zip', {
-        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ gallery: gallerySelect.value, person_id: personSelect.value, ids: requestedIDs }),
+        method: 'POST',
+        headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ gallery, person_id: personID, ids }),
       });
-      if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Download fehlgeschlagen.'); }
-      const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob());
-      link.download = `${gallerySelect.value || 'Hochzeitsfotos'}.zip`; link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 30000);
-    } catch (error) { window.alert(error.message); }
-    finally { button.disabled = false; button.textContent = label; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Download fehlgeschlagen.');
+      }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = `${filename}.zip`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+      updateAlbumDownloadButton();
+    }
   }
 
   async function downloadSelection() {
-    const chosen = items.filter((item) => selected.has(item.id) && item.kind === 'image');
-    if (!chosen.length) return;
-    const smallEnoughForShare = chosen.length <= 5 && chosen.reduce((total, item) => total + Number(item.size || 0), 0) <= 100 * 1024 * 1024;
-    if (smallEnoughForShare && navigator.share && navigator.canShare) {
-      try {
-        const files = await Promise.all(chosen.map(originalFile));
-        if (navigator.canShare({ files })) {
-          await navigator.share({ files, title: gallerySelect.value || 'Hochzeitsfotos' });
-          return;
-        }
-      } catch (error) {
-        if (error.name === 'AbortError') return;
-      }
-    }
-    await downloadZIP(chosen.map((item) => item.id));
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    await downloadZIP({
+      ids,
+      gallery: gallerySelect.value,
+      filename: 'Ausgewaehlte-Hochzeitsfotos',
+      button: document.querySelector('#download-selection'),
+    });
   }
 
   function setFaceStatus(message, isError = false) {
@@ -350,27 +365,42 @@
   function beginSelection() { selecting = true; selected.clear(); menu.hidden = true; updateSelectionUI(); }
   function endSelection() { selecting = false; selected.clear(); updateSelectionUI(); render(); }
   menuButton.addEventListener('click', () => { menu.hidden = !menu.hidden; menuButton.setAttribute('aria-expanded', String(!menu.hidden)); });
-  document.querySelector('#download-all').addEventListener('click', () => downloadZIP());
+  document.querySelector('#download-all').addEventListener('click', () => downloadZIP({
+    gallery: '',
+    personID: '',
+    filename: 'Hochzeitsfotos',
+    button: document.querySelector('#download-all'),
+  }));
+  downloadAlbumButton.addEventListener('click', () => {
+    if (!gallerySelect.value) return;
+    downloadZIP({
+      gallery: gallerySelect.value,
+      personID: '',
+      filename: gallerySelect.value,
+      button: downloadAlbumButton,
+    });
+  });
   document.querySelector('#select-download').addEventListener('click', beginSelection);
   document.querySelector('#select-all').addEventListener('click', () => { selected = new Set(items.filter((item) => item.kind === 'image').map((item) => item.id)); render(); updateSelectionUI(); });
   document.querySelector('#clear-selection').addEventListener('click', () => { selected.clear(); render(); updateSelectionUI(); });
   document.querySelector('#cancel-selection').addEventListener('click', endSelection);
   document.querySelector('#download-selection').addEventListener('click', downloadSelection);
-  gallerySelect.addEventListener('change', resetPageAndRefresh);
+  gallerySelect.addEventListener('change', () => {
+    updateAlbumDownloadButton();
+    resetPageAndRefresh();
+  });
   personSelect.addEventListener('change', resetPageAndRefresh);
   sortSelect.addEventListener('change', resetPageAndRefresh);
   pageSizeSelect.addEventListener('change', resetPageAndRefresh);
   pagePrev.addEventListener('click', async () => {
     if (currentPage <= 1) return;
     currentPage -= 1;
-    selected.clear();
     await refresh();
     count.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   pageNext.addEventListener('click', async () => {
     if (currentPage >= totalPages) return;
     currentPage += 1;
-    selected.clear();
     await refresh();
     count.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });

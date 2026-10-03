@@ -35,17 +35,16 @@
 		</select></label>
 		<label>Bilder pro Seite<select id="page-size-select" aria-label="Bilder pro Seite">
 		  <option value="10">10</option>
-		  <option value="20" selected>20</option>
-		  <option value="30">30</option>
-		  <option value="40">40</option>
+		  <option value="25" selected>25</option>
 		  <option value="50">50</option>
 		</select></label>
 		<button class="face-search-button" id="face-search-button" type="button" hidden>⌾ Finde mich</button>
 		<div class="download-menu">
 		  <button id="download-menu-button" type="button" aria-expanded="false">Herunterladen</button>
 		  <div id="download-menu" hidden>
-			<button id="download-all" type="button">Alle gefilterten Fotos herunterladen</button>
-			<button id="select-download" type="button">Auswahl herunterladen</button>
+			<button id="download-all" type="button">Alle Bilder herunterladen</button>
+			<button id="download-album" type="button">Aktuelles Album herunterladen</button>
+			<button id="select-download" type="button">Bilder auswählen</button>
 		  </div>
 		</div>
 	  </div>
@@ -66,7 +65,7 @@
 	  </section>
 	  <div class="selection-bar" id="selection-bar" hidden>
 		<strong id="selection-count">0 Fotos ausgewählt</strong>
-		<div><button id="select-all" type="button">Alle auswählen</button><button id="clear-selection" type="button">Auswahl aufheben</button><button id="download-selection" type="button">Auswahl herunterladen</button><button id="cancel-selection" type="button">Abbrechen</button></div>
+		<div><button id="select-all" type="button">Diese Seite auswählen</button><button id="clear-selection" type="button">Auswahl aufheben</button><button id="download-selection" type="button">Auswahl herunterladen</button><button id="cancel-selection" type="button">Abbrechen</button></div>
 	  </div>
       <div class="gallery-status">
         <strong id="media-count">Galerie wird geladen …</strong>
